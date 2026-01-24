@@ -62,7 +62,7 @@
 
             <view class="search-bar-row">
               <view class="search-wrap">
-                <input class="search-input" v-model="catSearch" placeholder="搜索知识点..." @confirm="handleCatSearch" />
+                <input class="search-input" v-model="catSearch" placeholder="搜索知识点..." @input="handleCatSearchInput" />
               </view>
               <view class="multi-switch" @click="isMultiSelect = !isMultiSelect" :class="{active: isMultiSelect}" title="开启多选">
                 <text class="switch-txt">多选</text>
@@ -87,67 +87,134 @@
 
         <view class="content-canvas">
           <view class="filter-bar">
-            <view class="f-row">
-              <text class="f-label">题型:</text>
-              <view class="f-tags">
-                <text class="tag" :class="{active: selectedType==='全部'}" @click="selectedType='全部'">全部</text>
-                <text class="tag" v-for="t in ['单选题','多选题','填空题','解答题']" :key="t" :class="{active: selectedType===t}" @click="selectedType=t">{{ t }}</text>
-              </view>
+            
+            <view class="filter-header" @click="isFilterExpanded = !isFilterExpanded">
+              <text class="fh-title">筛选条件</text>
+              <text class="fh-icon">{{ isFilterExpanded ? '▲ 收起' : '▼ 展开' }}</text>
             </view>
-            <view class="f-row mt-2">
-              <text class="f-label">难度:</text>
-              <view class="f-tags">
-                <text class="tag" :class="{active: selectedDiff==='全部'}" @click="selectedDiff='全部'">全部</text>
-                <text class="tag" v-for="d in [1,2,3,4,5]" :key="d" :class="{active: selectedDiff===d}" @click="selectedDiff=d">{{ '★'.repeat(d) }}</text>
-              </view>
-            </view>
-            <view class="f-row mt-2" v-if="allActiveFilters.length > 0">
-              <text class="f-label">筛选:</text>
-              <view class="f-tags">
-                <view v-for="item in allActiveFilters" :key="item.id" class="tag-chip blue">
-                  {{ item.name }} <text class="x-btn" @click.stop="removeFilter(item)">✕</text>
+          
+            <view v-show="isFilterExpanded" class="filter-body">
+              <view class="f-row">
+                <text class="f-label">题型:</text>
+                <view class="f-tags">
+                  <text class="tag" :class="{active: selectedType==='全部'}" @click="selectedType='全部'">全部</text>
+                  <text class="tag" v-for="t in typeOptions" :key="t" :class="{active: selectedType===t}" @click="selectedType=t">{{ t }}</text>
                 </view>
-                <text class="clear-link" @click="clearAllFilters">清空</text>
               </view>
-            </view>
+              
+              <view class="f-row mt-2">
+                <text class="f-label">难度:</text>
+                <view class="f-tags">
+                  <text class="tag" :class="{active: selectedDiff==='全部'}" @click="selectedDiff='全部'">全部</text>
+                  <text class="tag" v-for="d in [1,2,3,4,5]" :key="d" :class="{active: selectedDiff===d}" @click="selectedDiff=d">{{ '★'.repeat(d) }}</text>
+                </view>
+              </view>
+              
+              <view class="f-row mt-2 align-start">
+                <text class="f-label">地区:</text>
+                <view class="province-grid">
+                  <text class="tag" :class="{active: selectedProvince==='全部'}" @click="selectedProvince='全部'">全部</text>
+                  <text class="tag" v-for="p in provinceOptions" :key="p" :class="{active: selectedProvince===p}" @click="selectedProvince=p">{{ p }}</text>
+                </view>
+              </view>
+          
+              <view class="f-row mt-2 extra-filters">
+                  <view class="mini-filter-item">
+                      <text class="mf-label">年份:</text>
+                      <input class="mf-input" v-model="filterYear" placeholder="如 2023" @input="debounceLoadQuestions" />
+                  </view>
+                  <view class="mini-filter-item">
+                      <text class="mf-label">题号:</text>
+                      <input class="mf-input small" v-model="filterQNumber" placeholder="数字" @input="debounceLoadQuestions" />
+                  </view>
+                  <view class="mini-filter-item flex-grow">
+                      <text class="mf-label">来源:</text>
+                      <input class="mf-input grow" v-model="filterSource" placeholder="输入关键词搜索..." @input="debounceLoadQuestions" />
+                  </view>
+              </view>
+          
+              <view class="f-row mt-2" v-if="allActiveFilters.length > 0">
+                <text class="f-label">筛选:</text>
+                <view class="f-tags">
+                  <view v-for="item in allActiveFilters" :key="item.id" class="tag-chip blue">
+                    {{ item.name }} <text class="x-btn" @click.stop="removeFilter(item)">✕</text>
+                  </view>
+                  <text class="clear-link" @click="clearAllFilters">清空</text>
+                </view>
+              </view>
+          
+            </view> 
           </view>
 
           <scroll-view scroll-y class="list-scroll">
             <view v-if="loading" class="state-txt">加载中...</view>
             <view v-else-if="questions.length===0" class="state-txt">暂无题目</view>
+            
             <view v-for="q in displayedQuestions" :key="q.id" class="q-card">
               <view class="q-header">
                 <view class="meta-left">
-                  <text class="m-year">{{ q.year }}</text>
-                  <text class="m-src">{{ q.source }}</text>
-                  <text class="m-code">#{{ q.qNumber }}</text>
-                  <text class="m-type">[{{ q.type }}]</text>
-                  <text class="m-diff">{{ '★'.repeat(q.difficulty) }}</text>
+                  <text class="info-chip year">{{ q.year || '未知年份' }}</text>
+                  <text class="info-chip src">{{ q.source || '未知来源' }}</text>
+                  <text class="info-chip num">第 {{ q.qNumber || '-' }} 题</text>
+                  <text class="info-chip diff">{{ '★'.repeat(q.difficulty) }}</text>
+                  <text class="info-chip type">{{ q.type }}</text>
+                  <text class="info-chip prov" v-if="q.province">{{ q.province }}</text>
                 </view>
                 <view class="meta-right">
                   <text class="op-btn blue" @click="openEditModal(q)">编辑</text>
                   <text class="op-btn red" @click="handleDelete(q.id)">删除</text>
                 </view>
               </view>
-              <view class="q-body" @click="toggleAnswer(q.id)">
-                <view class="body-row">
-                  <view class="q-title"><LatexText :text="q.title"></LatexText></view>
-                  <image v-if="q.image" :src="q.image" mode="aspectFit" class="q-img" />
+
+              <view class="q-body" :class="{ 'layout-side-right': q.imgPosCode === 'r' }" @click="toggleAnswer(q.id)">
+                <view class="content-wrapper">
+                    <view v-if="q.image && q.imgPosCode.startsWith('u')" class="img-container" :class="'align-'+q.imgAlign">
+                       <image :src="q.image" class="q-image" mode="widthFix" />
+                    </view>
+                    <view class="body-row">
+                      <view class="q-title"><LatexText :text="q.title"></LatexText></view>
+                    </view>
+                    <view v-if="q.image && q.imgPosCode.startsWith('m')" class="img-container" :class="'align-'+q.imgAlign">
+                       <image :src="q.image" class="q-image" mode="widthFix" />
+                    </view>
+                    <view v-if="q.options && (q.type && (q.type.includes('单选') || q.type.includes('多选') || q.type.includes('选择')))" class="opt-grid" :style="'grid-template-columns: repeat(' + (q.optionLayout||4) + ', 1fr)'">
+                      <view v-for="(val, key) in q.options" :key="key" class="opt-item"><text class="opt-key">{{ key }}.</text><LatexText :text="val"></LatexText></view>
+                    </view>
+                    <view v-if="q.image && q.imgPosCode.startsWith('b')" class="img-container" :class="'align-'+q.imgAlign">
+                       <image :src="q.image" class="q-image" mode="widthFix" />
+                    </view>
+
+                    <view v-if="showAnswerMap[q.id]" class="answer-box">
+                        <view class="ans-block" v-if="q.answer">
+                            <view class="ans-tag answer">答案</view>
+                            <view class="ans-content"><LatexText :text="q.answer"></LatexText></view>
+                        </view>
+                        <view class="ans-block" v-if="q.analysis">
+                            <view class="ans-tag analysis">分析</view>
+                            <view class="ans-content"><LatexText :text="q.analysis"></LatexText></view>
+                        </view>
+                        <view class="ans-block" v-if="q.detailed">
+                            <view class="ans-tag detailed">详解</view>
+                            <view class="ans-content"><LatexText :text="q.detailed"></LatexText></view>
+                        </view>
+                    </view>
                 </view>
-                <view v-if="q.options && (q.type.includes('单选') || q.type.includes('多选'))" class="opt-grid" :class="'cols-'+(q.optionLayout||4)">
-                  <view v-for="(val, key) in q.options" :key="key" class="opt-item"><text class="opt-key">{{ key }}.</text><LatexText :text="val"></LatexText></view>
-                </view>
-                <view v-if="showAnswerMap[q.id]" class="answer-box">
-                    <text class="ans-label">【答案】</text>
-                    <LatexText :text="q.answer"></LatexText>
+                <view v-if="q.image && q.imgPosCode === 'r'" class="side-img-container">
+                   <image :src="q.image" class="q-image" mode="widthFix" />
                 </view>
               </view>
+
               <view class="q-footer">
                 <view class="tags-row">
-                  <view v-for="tag in [...getKnowledgeTags(q.categoryIds), ...(q.tags||[])]" :key="tag.id || tag" class="tag-badge" @click.stop="handleTagClick(tag.title || tag)">🏷️ {{ tag.title || tag }}</view>
-                  <text class="hash-code">#{{ q.code }}</text>
+                  <view v-for="tag in getKnowledgeTags(q.categoryIds)" :key="'k-'+(tag.id || tag.title)" class="tag-badge red" @click.stop="handleTagClick(tag.title || tag)">🏷️ {{ tag.title || tag }}</view>
+                  <view v-for="tag in (q.tags||[])" :key="'t-'+tag" class="tag-badge blue" @click.stop="handleTagClick(tag)">🏷️ {{ tag }}</view>
                 </view>
-                <view class="basket-add-btn" :class="{waiting: waitingBasketKey===q.id}" @click.stop="toggleWaiting(q.id)">+</view>
+                <view class="footer-right">
+                    <text class="hash-code">#{{ q.code }}</text>
+                    <view class="basket-add-btn-rect" :class="{waiting: waitingBasketKey===q.id}" @click.stop="toggleWaiting(q.id)">
+                        {{ waitingBasketKey===q.id ? '选择篮子...' : '加入试题篮' }}
+                    </view>
+                </view>
               </view>
             </view>
             <view style="height: 40px;"></view>
@@ -187,7 +254,7 @@
         v-model:visible="showAddModal" 
         :subjectId="currentSubjectId" 
         :knowledgeList="flatLeaves" 
-        @saved="loadQuestions" 
+        @saved="handleQuestionSaved" 
     />
 
     <CommonModal :isOpen="activeBasketId!==null" :title="'试题篮 '+activeBasketId" maxWidth="600px" @close="activeBasketId=null">
@@ -202,7 +269,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue';
-import { getSubjects, getCategories, getQuestions, deleteQuestion } from '@/api/question.js';
+import { getSubjects, getCategories, getQuestions, deleteQuestion, getFilters } from '@/api/question.js';
 import { baseUrl } from '@/utils/request.js';
 import CategoryTree from '@/components/CategoryTree.vue';
 import CommonModal from '@/components/CommonModal.vue';
@@ -211,6 +278,15 @@ import Whiteboard from '@/components/Whiteboard.vue';
 import AddQuestionModal from '@/components/AddQuestionModal.vue';
 import ManageSubjectModal from '@/components/ManageSubjectModal.vue';
 import ManageContentModal from '@/components/ManageContentModal.vue';
+
+// [新增] 定义所有省份列表
+const ALL_PROVINCES = [
+    "北京", "天津", "上海", "重庆", "河北", "山西", "内蒙古", 
+    "辽宁", "吉林", "黑龙江", "江苏", "浙江", "安徽", "福建", 
+    "江西", "山东", "河南", "湖北", "湖南", "广东", "广西", 
+    "海南", "四川", "贵州", "云南", "西藏", "陕西", "甘肃", 
+    "青海", "宁夏", "新疆"
+];
 
 // --- State ---
 const activeTab = ref('question_bank');
@@ -234,6 +310,7 @@ const treeExpandedIds = ref([]);
 const manageMenuOpen = ref(false);
 const subjectDropdownOpen = ref(false);
 const isMultiSelect = ref(false);
+const isFilterExpanded = ref(true); 
 
 const showAddModal = ref(false);
 const showSubjectModal = ref(false);
@@ -245,10 +322,21 @@ const showAnswerMap = ref({});
 const waitingBasketKey = ref(null);
 const baskets = ref({1:[],2:[],3:[],4:[],5:[],6:[],7:[]});
 
+const typeOptions = ref(['单选题','多选题','填空题','解答题']);
+const provinceOptions = ref(ALL_PROVINCES); 
+const selectedProvince = ref('全部');
+const filterYear = ref('');
+const filterSource = ref('');
+const filterQNumber = ref('');
+
+let debounceTimer = null;
+
 const currentSubjectName = computed(() => subjects.value[currentSubjectIdx.value]?.title || '加载中');
 const currentSubjectId = computed(() => subjects.value[currentSubjectIdx.value]?.id);
 const totalPages = computed(() => Math.ceil(questions.value.length / itemsPerPage.value));
 const displayedQuestions = computed(() => questions.value.slice((currentPage.value-1)*itemsPerPage.value, currentPage.value*itemsPerPage.value));
+
+const provinceOptionsWithAll = computed(() => ['全部', ...provinceOptions.value]);
 
 const allActiveFilters = computed(() => {
     const list = [];
@@ -259,6 +347,10 @@ const allActiveFilters = computed(() => {
         }
     });
     selectedTags.value.forEach(tag => { list.push({ type: 'tag', id: tag, name: tag }); });
+    if(selectedProvince.value !== '全部') list.push({ type: 'province', id: 'prov', name: selectedProvince.value });
+    if(filterYear.value) list.push({ type: 'year', id: 'year', name: filterYear.value });
+    if(filterSource.value) list.push({ type: 'source', id: 'src', name: filterSource.value });
+    if(filterQNumber.value) list.push({ type: 'qnum', id: 'qn', name: '#' + filterQNumber.value });
     return list;
 });
 
@@ -267,12 +359,16 @@ watch([selectedType, selectedDiff, selectedTags, selectedCategoryIds], () => {
     loadQuestions();
 }, { deep: true });
 
+watch([selectedProvince], () => {
+    currentPage.value = 1;
+    loadQuestions();
+});
+
 onMounted(async () => {
     const subData = await getSubjects();
     subjects.value = subData || [];
     if(subjects.value.length) {
-        await loadCategories();
-        await loadQuestions();
+        await reloadAll(); 
     }
     window.addEventListener('keydown', handleKeyBasket);
     window.addEventListener('click', handleGlobalClick);
@@ -284,6 +380,39 @@ onUnmounted(() => {
 });
 
 // --- Logic ---
+
+const debounceLoadQuestions = () => {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+        loadQuestions();
+    }, 500);
+};
+
+const handleCatSearchInput = () => {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+        handleCatSearch();
+    }, 500);
+};
+
+const refreshFilters = async () => {
+    if(!currentSubjectId.value) return;
+    try {
+        const res = await getFilters(currentSubjectId.value);
+        typeOptions.value = (res.types && res.types.length) ? res.types : ['单选题','多选题','填空题','解答题'];
+        if(selectedType.value !== '全部' && !typeOptions.value.includes(selectedType.value)) {
+            selectedType.value = '全部';
+        }
+        if(selectedProvince.value !== '全部' && !provinceOptions.value.includes(selectedProvince.value)) {
+            selectedProvince.value = '全部';
+        }
+    } catch(e) { console.error(e); }
+};
+
+const handleQuestionSaved = async () => {
+    await refreshFilters();
+    await loadQuestions();
+};
 
 const toggleExpandAll = (expand) => {
     defaultTreeOpen.value = expand;
@@ -339,6 +468,10 @@ const loadQuestions = async () => {
     const params = { subjectId: currentSubjectId.value };
     if (selectedType.value !== '全部') params.type = selectedType.value;
     if (selectedDiff.value !== '全部') params.difficulty = selectedDiff.value;
+    if (selectedProvince.value !== '全部') params.province = selectedProvince.value;
+    if (filterYear.value) params.year = filterYear.value;
+    if (filterSource.value) params.source = filterSource.value;
+    if (filterQNumber.value) params.qNumber = filterQNumber.value;
     if (selectedTags.value.length) params.tags = selectedTags.value.join(',');
     if (selectedCategoryIds.value.length) {
         const allIds = new Set();
@@ -357,11 +490,30 @@ const loadQuestions = async () => {
                 try { parsedOptions = JSON.parse(parsedOptions); } catch (e) { parsedOptions = {}; }
             }
             if (!parsedOptions) parsedOptions = { A: '', B: '', C: '', D: '' };
+            
+            let imgPosCode = 'bm';
+            let imgAlign = 'center';
+            if (q.image) {
+                const match = q.image.match(/[?&]pos=([a-z]+)/);
+                if (match) {
+                    imgPosCode = match[1];
+                    if (imgPosCode === 'r') imgAlign = 'side-right'; 
+                    else {
+                        const h = imgPosCode.charAt(1) || 'm';
+                        if (h === 'l') imgAlign = 'left';
+                        else if (h === 'r') imgAlign = 'right';
+                        else imgAlign = 'center';
+                    }
+                }
+            }
+
             return {
                 ...q,
                 options: parsedOptions,
                 tags: q.tags || [],
-                code: q.code || 'A' + q.id.toString().substr(-4)
+                code: q.code || 'A' + q.id.toString().substr(-4),
+                imgPosCode, 
+                imgAlign
             };
         });
     } catch (e) {
@@ -377,12 +529,28 @@ const handleTagClick = (tag) => {
     else selectedTags.value.push(tag);
 };
 
-const removeFilter = (item) => {
-    if (item.type === 'cat') selectedCategoryIds.value = selectedCategoryIds.value.filter(id => id !== item.id);
-    else selectedTags.value = selectedTags.value.filter(tag => tag !== item.name);
+const handleProvinceChange = (e) => {
+    selectedProvince.value = provinceOptionsWithAll.value[e.detail.value];
 };
 
-const clearAllFilters = () => { selectedCategoryIds.value = []; selectedTags.value = []; loadQuestions(); };
+const removeFilter = (item) => {
+    if (item.type === 'cat') selectedCategoryIds.value = selectedCategoryIds.value.filter(id => id !== item.id);
+    else if (item.type === 'tag') selectedTags.value = selectedTags.value.filter(tag => tag !== item.name);
+    else if (item.type === 'province') selectedProvince.value = '全部';
+    else if (item.type === 'year') { filterYear.value = ''; loadQuestions(); }
+    else if (item.type === 'source') { filterSource.value = ''; loadQuestions(); }
+    else if (item.type === 'qnum') { filterQNumber.value = ''; loadQuestions(); }
+};
+
+const clearAllFilters = () => { 
+    selectedCategoryIds.value = []; 
+    selectedTags.value = []; 
+    selectedProvince.value = '全部';
+    filterYear.value = '';
+    filterSource.value = '';
+    filterQNumber.value = '';
+    loadQuestions(); 
+};
 
 const selectSubject = (index) => { currentSubjectIdx.value = index; subjectDropdownOpen.value = false; reloadAll(); };
 const reloadSubjects = async () => {
@@ -393,7 +561,12 @@ const reloadSubjects = async () => {
     currentSubjectIdx.value = idx !== -1 ? idx : 0;
     reloadAll();
 };
-const reloadAll = () => { loadCategories(); loadQuestions(); };
+
+const reloadAll = async () => { 
+    await loadCategories(); 
+    await refreshFilters(); 
+    await loadQuestions(); 
+};
 
 const handleTreeSelect = (e, node) => {
     const id = node.id;
@@ -425,8 +598,8 @@ const changePage = (delta) => {
 const handlePageSizeChange = (e) => { itemsPerPage.value = [10,20,50][e.detail.value]; currentPage.value = 1; loadQuestions(); }
 
 const handleCatSearch = () => { 
-    if(!catSearch.value) return;
     const keyword = catSearch.value;
+    if(!keyword) return; 
     const matchedLeaves = flatLeaves.value.filter(l => l.title.includes(keyword));
     if(matchedLeaves.length) {
         const ids = matchedLeaves.map(l => l.id);
@@ -437,10 +610,8 @@ const handleCatSearch = () => {
             if (path) path.forEach(pid => parentsToExpand.add(pid));
         });
         treeExpandedIds.value = Array.from(parentsToExpand);
-    } else {
-        uni.showToast({title:'未找到', icon:'none'});
+        loadQuestions();
     }
-    loadQuestions(); 
 };
 
 const openAddModal = () => {
@@ -523,45 +694,84 @@ page { height: 100%; overflow: hidden; font-family: "Times New Roman", "SimSun",
 .tree-scroll::-webkit-scrollbar-track { background: transparent; }
 .content-canvas { flex: 1; background: #f8fafc; display: flex; flex-direction: column; min-width: 0; height: 100%; overflow: hidden; }
 .filter-bar { background: white; padding: 12px 20px; border-bottom: 1px solid #e2e8f0; flex-shrink: 0; }
+.filter-header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 8px; cursor: pointer; border-bottom: 1px dashed #f1f5f9; margin-bottom: 8px; user-select: none; }
+.fh-title { font-size: 13px; font-weight: bold; color: #334155; }
+.fh-icon { font-size: 12px; color: #94a3b8; }
+.filter-header:hover .fh-icon { color: #2563eb; }
+.filter-body { display: flex; flex-direction: column; }
 .f-row { display: flex; align-items: center; gap: 10px; font-size: 13px; }
-.f-label { font-weight: bold; color: #64748b; width: 40px; }
+.f-row.mt-2 { margin-top: 8px; }
+.f-row.align-start { align-items: flex-start; }
+.f-label { font-weight: bold; color: #64748b; width: 40px; flex-shrink: 0; margin-top: 4px; }
 .f-tags { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; }
 .tag { padding: 4px 12px; border-radius: 15px; border: 1px solid #e2e8f0; cursor: pointer; color: #64748b; }
 .tag.active { background: #eff6ff; color: #2563eb; border-color: #bfdbfe; }
+.province-grid { display: grid; grid-template-columns: repeat(9, 1fr); gap: 8px; flex: 1; }
+.province-grid .tag { text-align: center; display: flex; justify-content: center; align-items: center; }
+.extra-filters { display: flex; align-items: center; gap: 12px; width: 100%; }
+.mini-filter-item { display: flex; align-items: center; gap: 6px; }
+.mini-filter-item.flex-grow { flex: 1; }
+.mf-label { color: #64748b; font-weight: bold; }
+.mf-picker { border: 1px solid #e2e8f0; padding: 4px 10px; border-radius: 4px; background: #fff; min-width: 60px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; color: #334155; }
+.mf-input { border: 1px solid #e2e8f0; padding: 4px 8px; border-radius: 4px; width: 80px; font-size: 13px; color: #334155; }
+.mf-input.small { width: 50px; }
+.mf-input.grow { width: 100%; }
 .tag-chip { font-size: 12px; padding: 2px 8px; border-radius: 12px; display: flex; align-items: center; gap: 4px; }
 .tag-chip.blue { background: #dbeafe; color: #1e40af; }
-.tag-chip.white { background: white; border: 1px solid #e2e8f0; }
 .x-btn { cursor: pointer; font-weight: bold; }
 .clear-link { font-size: 12px; color: #94a3b8; text-decoration: underline; cursor: pointer; margin-left: auto; }
 .list-scroll { flex: 1; padding: 20px; box-sizing: border-box; overflow-y: hidden; height: 0; }
 .state-txt { text-align: center; margin-top: 50px; color: #94a3b8; }
 .q-card { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
 .q-header { display: flex; justify-content: space-between; font-size: 12px; color: #64748b; margin-bottom: 10px; }
-.meta-left text { margin-right: 8px; }
-.m-type { color: #2563eb; font-weight: bold; }
-.m-diff { color: #f59e0b; }
+.meta-left { display: flex; gap: 6px; flex-wrap: wrap; }
+/* [优化] 头部信息圆角矩形样式 */
+.info-chip { padding: 2px 8px; border-radius: 4px; background: #f1f5f9; color: #64748b; font-size: 11px; display: flex; align-items: center; }
+.info-chip.type { color: #2563eb; background: #eff6ff; font-weight: bold; }
+.info-chip.diff { color: #f59e0b; background: #fffbeb; }
+.info-chip.err { color: #ef4444; background: #fef2f2; font-weight: bold; }
+.info-chip.prov { background: #f0fdf4; color: #166534; }
+.info-chip.year { background: #eef2ff; color: #4338ca; }
+.info-chip.num { font-family: monospace; }
 .op-btn { margin-left: 10px; cursor: pointer; font-weight: bold; }
 .op-btn.blue { color: #2563eb; }
 .op-btn.red { color: #ef4444; }
 .q-body { cursor: pointer; }
 .body-row { display: flex; margin-bottom: 10px; }
 .q-title { flex: 1; font-size: 15px; line-height: 1.6; color: #1e293b; }
-.q-img { width: 120px; height: 80px; border: 1px solid #eee; margin-left: 10px; }
+.q-img { max-width: 100%; border: 1px solid #eee; border-radius: 4px; }
 .opt-grid { display: grid; gap: 8px; font-size: 14px; margin-bottom: 10px; color: #334155; }
-.cols-1 { grid-template-columns: 1fr; }
-.cols-2 { grid-template-columns: 1fr 1fr; }
-.cols-4 { grid-template-columns: 1fr 1fr 1fr 1fr; }
 .opt-key { font-weight: bold; margin-right: 5px; flex-shrink: 0; margin-top: 3px; font-size: 16px; line-height: 1.8;}
 .opt-item { display: flex; align-items: flex-start; margin-bottom: 8px; }
 .opt-item :deep(.latex-text-container) { flex: 1; width: auto; }
-.answer-box { background: #f0f9ff; padding: 10px; border-radius: 4px; border: 1px dashed #bae6fd; font-size: 14px; color: #0c4a6e; }
-.ans-label { font-weight: bold; margin-right: 5px; }
+/* [优化] 答案/分析样式 */
+.answer-box { background: #f0f9ff; padding: 12px 15px; border-radius: 6px; border: 1px dashed #bae6fd; font-size: 14px; color: #0c4a6e; }
+.ans-block { margin-bottom: 12px; }
+.ans-block:last-child { margin-bottom: 0; }
+.ans-tag { display: inline-block; padding: 2px 8px; border-radius: 4px; color: white; font-size: 12px; font-weight: bold; margin-bottom: 4px; }
+.ans-tag.answer { background-color: #2563eb; }   /* 蓝色 */
+.ans-tag.analysis { background-color: #f59e0b; } /* 橙色 */
+.ans-tag.detailed { background-color: #10b981; } /* 绿色 */
+.ans-content { font-size: 14px; line-height: 1.6; color: #334155; }
 .q-footer { border-top: 1px solid #f1f5f9; margin-top: 10px; padding-top: 8px; display: flex; justify-content: space-between; align-items: center; }
-.tags-row { display: flex; gap: 8px; align-items: center; }
-.tag-badge { font-size: 11px; background: #f1f5f9; color: #64748b; padding: 2px 6px; border-radius: 4px; cursor: pointer; }
+.tags-row { display: flex; gap: 8px; align-items: center; flex: 1; }
+.tag-badge { font-size: 11px; padding: 2px 6px; border-radius: 4px; cursor: pointer; }
+.tag-badge.red { background: #fef2f2; color: #ef4444; border: 1px solid #fee2e2; }
+.tag-badge.blue { background: #eff6ff; color: #3b82f6; border: 1px solid #dbeafe; }
+.footer-right { display: flex; align-items: center; gap: 10px; }
 .hash-code { font-family: monospace; color: #cbd5e1; font-size: 11px; }
-.basket-add-btn { width: 28px; height: 28px; border: 1px solid #cbd5e1; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #64748b; }
-.basket-add-btn.waiting { background: #2563eb; color: white; border-color: #2563eb; animation: pulse 1s infinite; }
+/* [优化] 试题篮按钮改为圆角矩形 */
+.basket-add-btn-rect { padding: 4px 10px; border-radius: 4px; border: 1px solid #2563eb; color: #2563eb; font-size: 11px; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; font-weight: 500; }
+.basket-add-btn-rect:hover { background: #eff6ff; }
+.basket-add-btn-rect.waiting { background: #2563eb; color: white; animation: pulse 1s infinite; }
+/* [优化] 图片布局样式 */
+.img-container { margin: 10px 0; display: flex; width: 100%; }
+.img-container.align-left { justify-content: flex-start; }
+.img-container.align-center { justify-content: center; }
+.img-container.align-right { justify-content: flex-end; }
+.layout-side-right { display: flex; gap: 15px; align-items: flex-start; }
+.layout-side-right .content-wrapper { flex: 1; }
+.layout-side-right .side-img-container { width: 30%; max-width: 200px; flex-shrink: 0; }
 .right-toolbar { width: 80px; background: #f8fafc; border-left: 1px solid #e2e8f0; display: flex; flex-direction: column; align-items: center; padding: 20px 0; flex-shrink: 0; }
 .tool-head { font-size: 12px; font-weight: bold; color: #94a3b8; margin-bottom: 10px; }
 .tool-btn { width: 48px; height: 48px; border-radius: 12px; background: white; border: 1px solid #e2e8f0; display: flex; flex-direction: column; align-items: center; justify-content: center; margin-bottom: 10px; cursor: pointer; }

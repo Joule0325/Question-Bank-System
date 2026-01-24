@@ -53,18 +53,21 @@
           
           <view v-for="(item, idx) in previewList" :key="item.id + '_' + idx + '_' + parseVersion" class="q-card preview-card mb-4" :id="'q-card-'+idx"
             :class="{ active: currentPreviewIdx === idx }">
+            
             <view class="q-header">
               <view class="meta-left">
-                <text class="m-year">{{ item.year }}</text>
-                <text class="m-src" v-if="item.region">{{ item.region }}</text>
-                <text class="m-src" v-else-if="item._regionErr" style="color: #ef4444; font-weight: bold;">(地区错误)</text>
-                <text class="m-src" v-else style="color: #999;">(未设置地区)</text>
-                <text class="m-src" style="margin-left: 8px;">{{ item.source }}</text>
-                <text class="m-code">#{{ item.qNumber }}</text>
-                <text class="m-diff">{{ '★'.repeat(item.difficulty || 0) }}</text>
+                <text class="info-chip year">{{ item.year }}</text>
+                <text class="info-chip src">{{ item.source }}</text>
+                <text class="info-chip num">第 {{ item.qNumber }} 题</text>
+                <text class="info-chip diff">{{ '★'.repeat(item.difficulty || 0) }}</text>
+                <text class="info-chip type">{{ item.type }}</text>
+                <text class="info-chip prov" v-if="item.region">{{ item.region }}</text>
+                <text class="info-chip prov err" v-else-if="item._regionErr">(地区错误)</text>
+                <text class="info-chip prov" v-else style="color:#999">(未设置)</text>
               </view>
               <view class="meta-right"><text class="seq-num">No.{{ currentMode === -1 ? (idx + 1) : (currentMode + 1) }}</text></view>
             </view>
+
             <view class="q-body" :class="{ 'layout-side-right': item.imgPosCode === 'r' }">
               <view class="content-wrapper">
                 <view v-if="item.image && item.imgPosCode.startsWith('u')" class="img-container" :class="'align-'+item.imgAlign">
@@ -85,10 +88,22 @@
                 <view v-if="item.image && item.imgPosCode.startsWith('b')" class="img-container" :class="'align-'+item.imgAlign">
                    <image :src="item.image" class="q-image" mode="widthFix" />
                 </view>
-                <view class="answer-box mt-2" v-if="item.showAnswer && (item.answer || item.analysis)">
-                  <view v-if="item.analysis"><text class="ans-label">【分析】</text><LatexText :text="item.analysis"></LatexText></view>
-                  <view :style="{marginTop: item.analysis ? '10px' : '0'}"><text class="ans-label">【答案】</text><LatexText :text="item.answer"></LatexText></view>
+                
+                <view class="answer-box mt-2" v-if="item.showAnswer">
+                  <view class="ans-block" v-if="item.answer">
+                    <view class="ans-tag answer">答案</view>
+                    <view class="ans-content"><LatexText :text="item.answer"></LatexText></view>
+                  </view>
+                  <view class="ans-block" v-if="item.analysis">
+                    <view class="ans-tag analysis">分析</view>
+                    <view class="ans-content"><LatexText :text="item.analysis"></LatexText></view>
+                  </view>
+                  <view class="ans-block" v-if="item.detailed">
+                    <view class="ans-tag detailed">详解</view>
+                    <view class="ans-content"><LatexText :text="item.detailed"></LatexText></view>
+                  </view>
                 </view>
+
               </view>
               <view v-if="item.image && item.imgPosCode === 'r'" class="side-img-container">
                  <image :src="item.image" class="q-image" mode="widthFix" />
@@ -96,8 +111,8 @@
             </view>
             <view class="q-footer">
               <view class="tags-row">
-                <view v-for="tag in getKnowledgeTags(item.categoryIds)" :key="tag.id" class="tag-badge blue">🏷️ {{ tag.title }}</view>
-                <view v-for="tag in item.tags" :key="tag" class="tag-badge">🏷️ {{ tag }}</view>
+                <view v-for="tag in getKnowledgeTags(item.categoryIds)" :key="tag.id" class="tag-badge red">🏷️ {{ tag.title }}</view>
+                <view v-for="tag in item.tags" :key="tag" class="tag-badge blue">🏷️ {{ tag }}</view>
               </view>
               <view class="toggle-ans-btn" @click.stop="item.showAnswer = !item.showAnswer">{{ item.showAnswer ? '🙈 隐藏答案' : '👁️ 显示答案' }}</view>
             </view>
@@ -170,38 +185,15 @@ const parseVersion = ref(0);
 let lastClickTime = 0;
 let globalShowAnswer = true;
 
-// --- 地区数据定义 ---
-const regionData = {
-    "北京市": [], "天津市": [], "上海市": [], "重庆市": [],
-    "河北省": ["石家庄市","唐山市","秦皇岛市","邯郸市","邢台市","保定市","张家口市","承德市","沧州市","廊坊市","衡水市"],
-    "山西省": ["太原市","大同市","阳泉市","长治市","晋城市","朔州市","晋中市","运城市","忻州市","临汾市","吕梁市"],
-    "内蒙古自治区": ["呼和浩特市","包头市","乌海市","赤峰市","通辽市","鄂尔多斯市","呼伦贝尔市","巴彦淖尔市","乌兰察布市","兴安盟","锡林郭勒盟","阿拉善盟"],
-    "辽宁省": ["沈阳市","大连市","鞍山市","抚顺市","本溪市","丹东市","锦州市","营口市","阜新市","辽阳市","盘锦市","铁岭市","朝阳市","葫芦岛市"],
-    "吉林省": ["长春市","吉林市","四平市","辽源市","通化市","白山市","松原市","白城市","延边朝鲜族自治州"],
-    "黑龙江省": ["哈尔滨市","齐齐哈尔市","鸡西市","鹤岗市","双鸭山市","大庆市","伊春市","佳木斯市","七台河市","牡丹江市","黑河市","绥化市","大兴安岭地区"],
-    "江苏省": ["南京市","无锡市","徐州市","常州市","苏州市","南通市","连云港市","淮安市","盐城市","扬州市","镇江市","泰州市","宿迁市"],
-    "浙江省": ["杭州市","宁波市","温州市","嘉兴市","湖州市","绍兴市","金华市","衢州市","舟山市","台州市","丽水市"],
-    "安徽省": ["合肥市","芜湖市","蚌埠市","淮南市","马鞍山市","淮北市","铜陵市","安庆市","黄山市","滁州市","阜阳市","宿州市","六安市","亳州市","池州市","宣城市"],
-    "福建省": ["福州市","厦门市","莆田市","三明市","泉州市","漳州市","南平市","龙岩市","宁德市"],
-    "江西省": ["南昌市","景德镇市","萍乡市","九江市","新余市","鹰潭市","赣州市","吉安市","宜春市","抚州市","上饶市"],
-    "山东省": ["济南市","青岛市","淄博市","枣庄市","东营市","烟台市","潍坊市","济宁市","泰安市","威海市","日照市","临沂市","德州市","聊城市","滨州市","菏泽市"],
-    "河南省": ["郑州市","开封市","洛阳市","平顶山市","安阳市","鹤壁市","新乡市","焦作市","濮阳市","许昌市","漯河市","三门峡市","南阳市","商丘市","信阳市","周口市","驻马店市","省直辖县级行政单位"],
-    "湖北省": ["武汉市","黄石市","十堰市","宜昌市","襄阳市","鄂州市","荆门市","孝感市","荆州市","黄冈市","咸宁市","随州市","恩施土家族苗族自治州","省直辖县级行政单位"],
-    "湖南省": ["长沙市","株洲市","湘潭市","衡阳市","邵阳市","岳阳市","常德市","张家界市","益阳市","郴州市","永州市","怀化市","娄底市","湘西土家族苗族自治州"],
-    "广东省": ["广州市","深圳市","珠海市","汕头市","佛山市","韶关市","湛江市","肇庆市","江门市","茂名市","惠州市","梅州市","汕尾市","河源市","阳江市","清远市","东莞市","中山市","潮州市","揭阳市","云浮市"],
-    "广西壮族自治区": ["南宁市","柳州市","桂林市","梧州市","北海市","防城港市","钦州市","贵港市","玉林市","百色市","贺州市","河池市","来宾市","崇左市"],
-    "海南省": ["海口市","三亚市","三沙市","儋州市","省直辖县级行政单位"],
-    "四川省": ["成都市","自贡市","攀枝花市","泸州市","德阳市","绵阳市","广元市","遂宁市","内江市","乐山市","南充市","眉山市","宜宾市","广安市","达州市","雅安市","巴中市","资阳市","阿坝藏族羌族自治州","甘孜藏族自治州","凉山彝族自治州"],
-    "贵州省": ["贵阳市","六盘水市","遵义市","安顺市","毕节市","铜仁市","黔西南布依族苗族自治州","黔东南苗族侗族自治州","黔南布依族苗族自治州"],
-    "云南省": ["昆明市","曲靖市","玉溪市","保山市","昭通市","丽江市","普洱市","临沧市","楚雄彝族自治州","红河哈尼族彝族自治州","文山壮族苗族自治州","西双版纳傣族自治州","大理白族自治州","德宏傣族景颇族自治州","怒江傈僳族自治州","迪庆藏族自治州"],
-    "西藏自治区": ["拉萨市","日喀则市","昌都市","林芝市","山南市","那曲市","阿里地区"],
-    "陕西省": ["西安市","铜川市","宝鸡市","咸阳市","渭南市","延安市","汉中市","榆林市","安康市","商洛市"],
-    "甘肃省": ["兰州市","嘉峪关市","金昌市","白银市","天水市","武威市","张掖市","平凉市","酒泉市","庆阳市","定西市","陇南市","临夏回族自治州","甘南藏族自治州"],
-    "青海省": ["西宁市","海东市","海北藏族自治州","黄南藏族自治州","海南藏族自治州","果洛藏族自治州","玉树藏族自治州","海西蒙古族藏族自治州"],
-    "宁夏回族自治区": ["银川市","石嘴山市","吴忠市","固原市","中卫市"],
-    "新疆维吾尔自治区": ["乌鲁木齐市","克拉玛依市","吐鲁番市","哈密市","昌吉回族自治州","博尔塔拉蒙古自治州","巴音郭楞蒙古自治州","阿克苏地区","克孜勒苏柯尔克孜自治州","喀什地区","和田地区","伊犁哈萨克自治州","塔城地区","阿勒泰地区","省直辖县级行政单位"]
-};
+const PROVINCE_LIST = [
+    "北京", "天津", "上海", "重庆", "河北", "山西", "内蒙古", 
+    "辽宁", "吉林", "黑龙江", "江苏", "浙江", "安徽", "福建", 
+    "江西", "山东", "河南", "湖北", "湖南", "广东", "广西", 
+    "海南", "四川", "贵州", "云南", "西藏", "陕西", "甘肃", 
+    "青海", "宁夏", "新疆"
+];
 
+// [修改] 默认模板增加 ##详解
 const defaultTemplate = `##年份 2023年
 ##地区 
 ##来源 新高考II卷
@@ -211,17 +203,17 @@ const defaultTemplate = `##年份 2023年
 ##知识点 
 ##标签 
 ##题干 函数$y=\\dfrac{\\sqrt{x-1}}{3}$的定义域为.
-##选项 2
+##选项 4
 A.$(1,+\\infty)$
 B.$(-\\infty,1)$
 C.$[1,+\\infty)$
 D.$(-\\infty,1]$
 ##配图 
-##分析 
 ##答案 
+##分析 
+##详解 
 `;
 
-// --- 初始化 ---
 const open = (questionData = null) => {
   emit('update:visible', true);
   if (questionData) initEdit(questionData);
@@ -262,23 +254,28 @@ const initEdit = (q) => {
 ${q.title || ''}
 `;
   
-  // 修改：回显逻辑也使用新的判断（包含“选”字即为选择题）
   if (q.type && q.type.includes('选')) {
-      text += `##选项 ${q.optionLayout || 2}\n`;
+      text += `##选项 ${q.optionLayout || 4}\n`; 
       if(q.options) {
         Object.keys(q.options).sort().forEach(k => { text += `${k}.${q.options[k]}\n`; });
       }
   }
+  
+  // [修改] 修复图片ID问题：生成随机ID
   let imgIdStr = '';
   if(q.image) {
-    tempUploadedImages.value['EXISTING'] = q.image;
-    imgIdStr = 'EXISTING';
+    const existingId = Math.floor(1000000 + Math.random() * 9000000).toString();
+    tempUploadedImages.value[existingId] = q.image;
+    imgIdStr = existingId;
+    
     if(q.image.includes('?pos=')) {
         const match = q.image.match(/pos=([a-z]+)/);
         if(match) imgIdStr = match[1] + imgIdStr;
     }
   }
-  text += `##配图 ${imgIdStr}\n##分析 \n${q.analysis || ''}\n##答案 \n${q.answer || ''}\n`;
+  
+  // [修改] 回显模板顺序：答案、分析、详解
+  text += `##配图 ${imgIdStr}\n##答案 \n${q.answer || ''}\n##分析 \n${q.analysis || ''}\n##详解 \n${q.detailed || ''}\n`;
   inputRawText.value = text;
   parseTemplate();
 };
@@ -288,7 +285,6 @@ const handleGlobalClick = () => {
 };
 const setActiveArea = (area) => { activeArea.value = area; };
 
-// --- 模式切换 ---
 const switchMode = (modeIndex) => {
     if (currentMode.value === modeIndex) return;
     saveCurrentToCache();
@@ -342,7 +338,6 @@ const loadFromCache = (modeIndex) => {
     inputRawText.value = '';
 };
 
-// --- 图片位置 ---
 const adjustImgPos = (id, dx, dy) => {
     const text = inputRawText.value;
     const lines = text.split('\n');
@@ -392,7 +387,6 @@ const calculateNewPos = (code, dx, dy, isMCQ) => {
     return v + h;
 };
 
-// --- 解析 ---
 const manualParse = () => { parseTemplate(); };
 
 const highlightError = (start, end, msg) => {
@@ -429,8 +423,6 @@ const validateTemplate = () => {
         else if (lineTrim.startsWith('##选项')) {
             const parts = line.split(/\s+/);
             if (parts.length < 2 || !/^\d+$/.test(parts[1])) { highlightError(lineStart, lineEnd, '选项布局数字必须同行'); return false; }
-            
-            // 修改：只要不包含“选”字，就不能有选项
             if (currentType && !currentType.includes('选')) { 
                 highlightError(lineStart, lineEnd, `非选择题不能包含选项`); 
                 return false; 
@@ -496,14 +488,16 @@ const parseSingleChunk = (chunkText, chunkStartOffset = 0) => {
     const lines = chunkText.split('\n');
     const result = {};
     let currentModule = '';
-    const multiLineModules = ['题干', '分析', '答案', '选项'];
+    // [修改] 增加 详解
+    const multiLineModules = ['题干', '分析', '答案', '选项', '详解'];
     
     const qData = {
         id: '', year: '2023', source: '新高考', difficulty: 3, type: '单选题', qNumber: '1',
-        title: '', image: '', answer: '', analysis: '', optionLayout: 2, options: {}, optionRows: [],
+        title: '', image: '', answer: '', analysis: '', detailed: '',
+        optionLayout: 4, options: {}, optionRows: [],
         categoryIds: [], tags: [], showAnswer: true,
         imgPosCode: 'bm', imgAlign: 'center', imgId: '',
-        province: '', region: '', // 只存省份
+        province: '', region: '', 
         _regionErr: null
     };
 
@@ -519,7 +513,6 @@ const parseSingleChunk = (chunkText, chunkStartOffset = 0) => {
             const content = headerMatch[2];
             currentModule = moduleName;
             
-            // --- 地区解析 ---
             if (moduleName === '地区') {
                 if (content) {
                     const absStart = chunkStartOffset + charCount;
@@ -528,31 +521,18 @@ const parseSingleChunk = (chunkText, chunkStartOffset = 0) => {
                     if (/(香港|澳门|台湾)/.test(content)) {
                         qData._regionErr = { start: absStart, end: absEnd, msg: '暂不支持该地区录入' };
                     } else {
-                        // 支持 '/' 分隔多选
                         const inputs = content.split('/');
                         const validProvincesFound = [];
                         let hasError = false;
-
                         for (const input of inputs) {
                             const raw = input.trim();
                             if (!raw) continue;
-                            
-                            // 模糊匹配：输入 "四川" -> 匹配 "四川省"
-                            // 使用 regionData 的 key 作为数据源，不再依赖 provinceList
-                            const matched = Object.keys(regionData).find(p => p === raw || p.startsWith(raw));
-                            
-                            if (matched) {
-                                validProvincesFound.push(matched);
-                            } else {
-                                hasError = true;
-                                qData._regionErr = { start: absStart, end: absEnd, msg: `"${raw}" 不是支持的省份` };
-                                break;
-                            }
+                            // [修改] 使用 PROVINCE_LIST 进行匹配，支持前缀匹配
+                            const matched = PROVINCE_LIST.find(p => p === raw || raw.startsWith(p));
+                            if (matched) validProvincesFound.push(matched);
+                            else { hasError = true; qData._regionErr = { start: absStart, end: absEnd, msg: `"${raw}" 不是支持的省份` }; break; }
                         }
-
-                        if (!hasError && validProvincesFound.length > 0) {
-                            qData.province = validProvincesFound.join('/');
-                        }
+                        if (!hasError && validProvincesFound.length > 0) qData.province = validProvincesFound.join('/');
                     }
                 }
             } else {
@@ -575,7 +555,6 @@ const parseSingleChunk = (chunkText, chunkStartOffset = 0) => {
     qData.source = getVal('来源'); qData.qNumber = getVal('题号');
     qData.difficulty = parseInt(getVal('难度')) || 3; qData.type = getVal('题型') || '单选题';
     qData.title = getVal('题干'); 
-    
     qData.region = qData.province; 
 
     const kpRaw = getVal('知识点');
@@ -603,12 +582,11 @@ const parseSingleChunk = (chunkText, chunkStartOffset = 0) => {
         }
     }
 
-    // 修改：只要包含“选”字，就解析选项
     if (qData.type.includes('选')) {
         const optLines = result['选项'] || [];
-        let targetRows = 2;
+        let targetCols = 4;
         const rawOptions = [];
-        if (optLines.length > 0 && /^\d+$/.test(optLines[0])) { targetRows = parseInt(optLines[0]); optLines.shift(); }
+        if (optLines.length > 0 && /^\d+$/.test(optLines[0])) { targetCols = parseInt(optLines[0]); optLines.shift(); }
         optLines.forEach(line => {
             const parts = line.split(/([A-Z][.、])/).filter(x=>x);
             for(let i=0; i<parts.length; i+=2) {
@@ -620,34 +598,27 @@ const parseSingleChunk = (chunkText, chunkStartOffset = 0) => {
                 }
             }
         });
-        qData.optionLayout = targetRows;
-        qData.optionRows = distributeOptions(rawOptions, targetRows);
+        qData.optionLayout = targetCols;
+        qData.optionRows = distributeOptions(rawOptions, targetCols);
     } else { qData.options = {}; qData.optionRows = []; }
 
     qData.analysis = getVal('分析');
     qData.answer = getVal('答案');
+    qData.detailed = getVal('详解'); // [新增]
     return qData;
 };
 
-const distributeOptions = (options, rowCount) => {
+const distributeOptions = (options, colCount) => {
     if (options.length === 0) return [];
-    if (rowCount <= 0) rowCount = 1;
-    if (rowCount > options.length) rowCount = options.length;
-    const total = options.length;
-    const baseCount = Math.floor(total / rowCount);
-    const remainder = total % rowCount;
+    if (colCount <= 0) colCount = 1;
     const resultRows = [];
-    let currentIdx = 0;
-    for (let i = 0; i < rowCount; i++) {
-        const countInThisRow = i < remainder ? baseCount + 1 : baseCount;
-        const rowItems = options.slice(currentIdx, currentIdx + countInThisRow);
-        if (rowItems.length > 0) resultRows.push(rowItems);
-        currentIdx += countInThisRow;
+    for (let i = 0; i < options.length; i += colCount) {
+        resultRows.push(options.slice(i, i + colCount));
     }
     return resultRows;
 };
 
-// --- Editor Functions ---
+// ... (Editor Functions 保持不变) ...
 const updateCursorPos = (e) => {
     if (document) {
         const el = document.querySelector('.raw-editor textarea') || document.querySelector('.raw-editor');
@@ -786,13 +757,13 @@ const handleSave = async () => {
 };
 const getKnowledgeTags = (ids) => ids.map(id => props.knowledgeList.find(l => l.id === id) || {id, title:id}).filter(x=>x);
 
-// Dummy
 const selectPreviewItem = (idx) => { currentPreviewIdx.value = idx; };
 
 defineExpose({ open });
 </script>
 
 <style scoped>
+/* (Header, Nav, Editor 样式保持不变) */
 .add-modal-header { background: #f9f9f9; padding: 10px 15px; border-bottom: 1px solid #eee; display: flex; flex-shrink: 0; justify-content: space-between; align-items: center; }
 .header-btns { display: flex; gap: 10px; }
 .header-info { text-align: right; }
@@ -800,11 +771,7 @@ defineExpose({ open });
 .shortcut-tips { font-size: 11px; color: #999; margin-top: 2px; }
 .menu-btn { padding: 6px 20px; border-radius: 20px; font-size: 13px; cursor: pointer; border: 1px solid #ccc; background: white; }
 .menu-btn.primary { background: #2563eb; color: white; border-color: #2563eb; }
-
-/* 布局 */
 .four-col-layout { display: flex; height: 700px; border-top: 1px solid #eee; overflow: hidden; }
-
-/* 1. 导航栏 */
 .nav-col { width: 50px; background: #f8fafc; border-right: 1px solid #e2e8f0; display: flex; flex-direction: column; align-items: center; padding-top: 10px; flex-shrink: 0; }
 .nav-item { width: 36px; height: 36px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 12px; cursor: pointer; margin-bottom: 8px; font-weight: bold; color: #64748b; background: #fff; border: 1px solid #e2e8f0; transition: all 0.2s; }
 .nav-item:hover { transform: scale(1.05); }
@@ -812,8 +779,6 @@ defineExpose({ open });
 .nav-item.active { background: #2563eb; color: white; border-color: #2563eb; box-shadow: 0 2px 5px rgba(37,99,235,0.3); }
 .nav-scroll { flex: 1; width: 100%; display: flex; flex-direction: column; align-items: center; overflow-y: auto; }
 .nav-scroll::-webkit-scrollbar { display: none; }
-
-/* 2. 编辑区 (25%) */
 .col-editor { width: 25%; border-right: 1px solid #eee; display: flex; flex-direction: column; padding: 10px; position: relative; min-width: 250px; overflow-y: auto; height: 100%; box-sizing: border-box; }
 .editor-wrap { flex: 1; position: relative; border: 1px solid #e2e8f0; border-radius: 4px; overflow: hidden; min-height: 500px; }
 .raw-editor { width: 100%; height: 100%; padding: 10px; box-sizing: border-box; font-family: monospace; font-size: 14px; line-height: 1.6; border: none; outline: none; resize: none; }
@@ -822,8 +787,6 @@ defineExpose({ open });
 .kp-item:hover, .kp-item.active { background: #eff6ff; color: #2563eb; }
 .idx-badge { background: #e2e8f0; color: #64748b; font-size: 10px; width: 16px; height: 16px; border-radius: 4px; display: flex; align-items: center; justify-content: center; margin-right: 8px; }
 .header-tip { color: #999; font-size: 11px; background: #f1f1f1; cursor: default; padding: 5px 12px; }
-
-/* 3. 预览区 (50%) */
 .col-preview { width: 50%; border-right: 1px solid #eee; display: flex; flex-direction: column; background: #f8fafc; min-width: 400px; position: relative; overflow-y: auto; height: 100%; box-sizing: border-box; }
 .convert-bar { position: absolute; left: 0; top: 50%; transform: translate(-50%, -50%); z-index: 10; }
 .convert-btn { background: #2563eb; color: white; width: 24px; height: 60px; display: flex; align-items: center; justify-content: center; border-radius: 0 4px 4px 0; cursor: pointer; writing-mode: vertical-rl; border: none; box-shadow: 2px 0 5px rgba(0,0,0,0.1); }
@@ -833,28 +796,29 @@ defineExpose({ open });
 .preview-card.active { border-color: #2563eb; box-shadow: 0 0 0 4px rgba(37,99,235,0.1); }
 .mb-4 { margin-bottom: 16px; }
 .q-header { display: flex; justify-content: space-between; font-size: 12px; color: #64748b; margin-bottom: 10px; }
-.meta-left text { margin-right: 8px; }
+.meta-left { display: flex; gap: 6px; flex-wrap: wrap; }
+/* [优化] 头部信息圆角矩形样式 */
+.info-chip { padding: 2px 8px; border-radius: 4px; background: #f1f5f9; color: #64748b; font-size: 11px; display: flex; align-items: center; }
+.info-chip.type { color: #2563eb; background: #eff6ff; font-weight: bold; }
+.info-chip.diff { color: #f59e0b; background: #fffbeb; }
+.info-chip.err { color: #ef4444; background: #fef2f2; font-weight: bold; }
+.info-chip.prov { background: #f0fdf4; color: #166534; }
+.info-chip.year { background: #eef2ff; color: #4338ca; }
+.info-chip.num { font-family: monospace; }
 .m-diff { color: #f59e0b; }
 .seq-num { font-weight: bold; color: #cbd5e1; }
 .q-title { display: block; width: 100%; font-size: 15px; line-height: 1.6; color: #1e293b; }
 .body-row { display: flex; margin-bottom: 10px; }
-
-/* 图片布局样式 */
 .img-container { margin: 10px 0; display: flex; width: 100%; }
 .img-container.align-left { justify-content: flex-start; }
 .img-container.align-center { justify-content: center; }
 .img-container.align-right { justify-content: flex-end; }
 .q-image { max-width: 100%; border: 1px solid #eee; border-radius: 4px; }
-
-/* Side Right 布局 (Flex) */
 .layout-side-right { display: flex; gap: 15px; align-items: flex-start; }
 .layout-side-right .content-wrapper { flex: 1; }
 .layout-side-right .side-img-container { width: 30%; max-width: 200px; flex-shrink: 0; }
-
-/* 4. 右侧 (25%) */
 .col-image { width: 25%; display: flex; flex-direction: column; padding: 10px; background: #fff; min-width: 250px; overflow-y: auto; height: 100%; box-sizing: border-box; }
 .uploaded-list { flex: 1; margin-bottom: 15px; }
-
 .img-item { border: 1px solid #eee; padding: 10px; border-radius: 6px; margin-bottom: 15px; background: #fcfcfc; }
 .img-preview-box { width: 100%; height: 120px; background: #f1f1f1; border-radius: 4px; display: flex; align-items: center; justify-content: center; overflow: hidden; margin-bottom: 8px; }
 .thumb { width: 100%; height: 100%; }
@@ -865,25 +829,30 @@ defineExpose({ open });
 .move-btn { width: 24px; height: 24px; background: #fff; border: 1px solid #cbd5e1; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 12px; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,0.05); user-select: none;}
 .move-btn:active { background: #f1f5f9; transform: translateY(1px); }
 .reset-link { font-size: 12px; color: #ef4444; margin-left: 5px; cursor: pointer; }
-
 .upload-area { border: 2px dashed #cbd5e1; border-radius: 8px; height: 100px; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; background: #f8fafc; flex-shrink: 0; outline: none; }
 .upload-area:focus { border-color: #2563eb; background: #eff6ff; }
 .upload-icon { font-size: 28px; margin-bottom: 6px; }
 .upload-text { font-size: 11px; color: #64748b; }
-
 .opt-container { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; color: #334155; }
 .opt-row { display: flex; gap: 10px; width: 100%; }
 .opt-item { flex: 1; display: flex; align-items: flex-start; font-size: 14px; }
 .opt-key { font-weight: bold; margin-right: 5px; flex-shrink: 0; margin-top: 0; line-height: 1.6; }
 .opt-val { flex: 1; word-break: break-all; }
 .opt-item :deep(.latex-text-container) { display: inline-block; width: auto; }
-
-.answer-box { background: #f0f9ff; padding: 10px; border-radius: 4px; border: 1px dashed #bae6fd; font-size: 14px; color: #0c4a6e; }
-.ans-label { font-weight: bold; margin-right: 5px; color: #0284c7; }
+/* [修改] 答案/分析样式优化 */
+.answer-box { background: #f0f9ff; padding: 12px 15px; border-radius: 6px; border: 1px dashed #bae6fd; font-size: 14px; color: #0c4a6e; }
+.ans-block { margin-bottom: 12px; }
+.ans-block:last-child { margin-bottom: 0; }
+.ans-tag { display: inline-block; padding: 2px 8px; border-radius: 4px; color: white; font-size: 12px; font-weight: bold; margin-bottom: 4px; }
+.ans-tag.answer { background-color: #2563eb; }   /* 蓝色 */
+.ans-tag.analysis { background-color: #f59e0b; } /* 橙色 */
+.ans-tag.detailed { background-color: #10b981; } /* 绿色 */
+.ans-content { font-size: 14px; line-height: 1.6; color: #334155; }
 .q-footer { border-top: 1px solid #f1f5f9; margin-top: 10px; padding-top: 8px; display: flex; justify-content: space-between; align-items: center; }
 .toggle-ans-btn { font-size: 12px; color: #64748b; cursor: pointer; padding: 2px 6px; border-radius: 4px; background: #f1f5f9; }
 .toggle-ans-btn:hover { background: #e2e8f0; color: #333; }
 .tags-row { display: flex; gap: 8px; align-items: center; }
-.tag-badge { font-size: 11px; background: #f1f5f9; color: #64748b; padding: 2px 6px; border-radius: 4px; }
-.tag-badge.blue { background: #dbeafe; color: #1e40af; }
+.tag-badge { font-size: 11px; padding: 2px 6px; border-radius: 4px; cursor: pointer; }
+.tag-badge.red { background: #fef2f2; color: #ef4444; border: 1px solid #fee2e2; }
+.tag-badge.blue { background: #eff6ff; color: #3b82f6; border: 1px solid #dbeafe; }
 </style>
