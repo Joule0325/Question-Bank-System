@@ -68,15 +68,10 @@
               <view class="meta-right"><text class="seq-num">No.{{ currentMode === -1 ? (idx + 1) : (currentMode + 1) }}</text></view>
             </view>
 
-            <view class="q-body" :class="{ 'layout-side-right': item.imgPosCode === 'r' }">
+            <view class="q-body">
               <view class="content-wrapper">
-                <view v-if="item.image && item.imgPosCode.startsWith('u')" class="img-container" :class="'align-'+item.imgAlign">
-                   <image :src="item.image" class="q-image" mode="widthFix" />
-                </view>
                 <view class="body-row"><view class="q-title"><LatexText :text="item.title"></LatexText></view></view>
-                <view v-if="item.image && item.imgPosCode.startsWith('m')" class="img-container" :class="'align-'+item.imgAlign">
-                   <image :src="item.image" class="q-image" mode="widthFix" />
-                </view>
+                
                 <view v-if="item.optionRows && item.optionRows.length > 0" class="opt-container">
                   <view v-for="(row, rIdx) in item.optionRows" :key="rIdx" class="opt-row">
                     <view v-for="opt in row" :key="opt.key" class="opt-item">
@@ -84,9 +79,6 @@
                       <view class="opt-val"><LatexText :text="opt.value"></LatexText></view>
                     </view>
                   </view>
-                </view>
-                <view v-if="item.image && item.imgPosCode.startsWith('b')" class="img-container" :class="'align-'+item.imgAlign">
-                   <image :src="item.image" class="q-image" mode="widthFix" />
                 </view>
                 
                 <view class="answer-box mt-2" v-if="item.showAnswer">
@@ -105,9 +97,6 @@
                 </view>
 
               </view>
-              <view v-if="item.image && item.imgPosCode === 'r'" class="side-img-container">
-                 <image :src="item.image" class="q-image" mode="widthFix" />
-              </view>
             </view>
             <view class="q-footer">
               <view class="tags-row">
@@ -125,18 +114,42 @@
         <view class="uploaded-list">
           <view class="img-item" v-for="(url, id) in tempUploadedImages" :key="id">
             <view class="img-preview-box"><image :src="url" mode="aspectFit" class="thumb" /></view>
-            <view class="img-id-row"><text class="img-id">编号: {{ id }}</text><text class="copy-btn" @click.stop="copyId(id)">复制</text></view>
-            <view class="img-move-row">
-                <view class="move-btn" @click="adjustImgPos(id, 0, -1)" title="上">▲</view>
-                <view class="move-btn" @click="adjustImgPos(id, 0, 1)" title="下">▼</view>
-                <view class="move-btn" @click="adjustImgPos(id, -1, 0)" title="左">◀</view>
-                <view class="move-btn" @click="adjustImgPos(id, 1, 0)" title="右">▶</view>
+            
+            <view class="img-id-row">
+                <text class="img-id" title="点击复制">ID: {{ id }}</text>
+                <text class="copy-btn" @click.stop="insertImgPlaceholder(id)">插入</text>
             </view>
+            
+            <view class="img-ctrl-row">
+                <text class="ctrl-lbl">排版</text>
+                <view class="align-group">
+                    <view class="align-btn" @click="updateImgAlign(id, 'l')" title="文字图片混排">行内</view>
+                    <view class="align-btn" @click="updateImgAlign(id, 'm')" title="独占一行居中">居中</view>
+                    <view class="align-btn" @click="updateImgAlign(id, 'r')" title="文字环绕图片">环绕</view>
+                </view>
+            </view>
+            
+            <view class="img-ctrl-row size-row">
+                <text class="ctrl-lbl">大小</text>
+                <view class="slider-box">
+                    <input 
+                      type="range" 
+                      min="10" 
+                      max="100" 
+                      step="5"
+                      :value="imageSizes[id] || 100" 
+                      class="size-slider"
+                      @input="(e) => handleSizeChange(id, e)"
+                    />
+                    <text class="size-val">{{ imageSizes[id] || 100 }}%</text>
+                </view>
+            </view>
+
           </view>
         </view>
         <view class="upload-area" @click.stop="handleUploadClick" tabindex="0">
           <text class="upload-icon">📷</text>
-          <text class="upload-text">点击 / 粘贴(Ctrl+V) / 拖拽上传</text>
+          <text class="upload-text">点击 / 粘贴 / 拖拽上传</text>
         </view>
       </view>
     </view>
@@ -163,12 +176,10 @@ const isEditing = ref(false);
 const editingId = ref(null);
 const inputRawText = ref('');
 const tempUploadedImages = ref({});
-const imageOffset = reactive({ x: 0, y: 0 });
+const imageSizes = reactive({}); 
 
 const kpSearchResults = ref([]);
 const showKpDropdown = ref(false);
-const kpDropdownTop = ref(0);
-const currentEditingLineIdx = ref(-1);
 const activeKpIndex = ref(0); 
 
 const previewList = ref([]);
@@ -193,7 +204,6 @@ const PROVINCE_LIST = [
     "青海", "宁夏", "新疆"
 ];
 
-// [修改] 默认模板增加 ##详解
 const defaultTemplate = `##年份 2023年
 ##地区 
 ##来源 新高考II卷
@@ -202,13 +212,13 @@ const defaultTemplate = `##年份 2023年
 ##题型 单选题
 ##知识点 
 ##标签 
-##题干 函数$y=\\dfrac{\\sqrt{x-1}}{3}$的定义域为.
+##题干 
+题目内容...
 ##选项 4
-A.$(1,+\\infty)$
-B.$(-\\infty,1)$
-C.$[1,+\\infty)$
-D.$(-\\infty,1]$
-##配图 
+A. 选项A
+B. 选项B
+C. 选项C
+D. 选项D
 ##答案 
 ##分析 
 ##详解 
@@ -227,7 +237,7 @@ const initAdd = () => {
   editingId.value = null;
   inputRawText.value = defaultTemplate;
   tempUploadedImages.value = {};
-  imageOffset.x = 0; imageOffset.y = 0;
+  for(const k in imageSizes) delete imageSizes[k];
   currentMode.value = -1;
   fullTextCache.value = '';
   cachedPreviewList.value = [];
@@ -239,6 +249,8 @@ const initEdit = (q) => {
   editingId.value = q.id;
   currentMode.value = -1;
   cachedPreviewList.value = [];
+  tempUploadedImages.value = {};
+  for(const k in imageSizes) delete imageSizes[k];
   
   let regionStr = q.province || ''; 
 
@@ -261,22 +273,38 @@ ${q.title || ''}
       }
   }
   
-  // [修改] 修复图片ID问题：生成随机ID
-  let imgIdStr = '';
-  if(q.image) {
-    const existingId = Math.floor(1000000 + Math.random() * 9000000).toString();
-    tempUploadedImages.value[existingId] = q.image;
-    imgIdStr = existingId;
-    
-    if(q.image.includes('?pos=')) {
-        const match = q.image.match(/pos=([a-z]+)/);
-        if(match) imgIdStr = match[1] + imgIdStr;
-    }
-  }
+  text += `##答案 \n${q.answer || ''}\n##分析 \n${q.analysis || ''}\n##详解 \n${q.detailed || ''}\n`;
   
-  // [修改] 回显模板顺序：答案、分析、详解
-  text += `##配图 ${imgIdStr}\n##答案 \n${q.answer || ''}\n##分析 \n${q.analysis || ''}\n##详解 \n${q.detailed || ''}\n`;
-  inputRawText.value = text;
+  const tagRegex = /\[img:([^\]]+)\]/g; 
+  let imgCounter = 1; 
+  
+  const processedText = text.replace(tagRegex, (match, innerContent) => {
+      const parts = innerContent.split(':');
+      let width = null;
+      let align = null;
+      
+      if (parts.length > 1 && /^\d+$/.test(parts[parts.length-1])) width = parts.pop();
+      if (parts.length > 1 && /^[lmr]$/.test(parts[parts.length-1])) align = parts.pop();
+      
+      const url = parts.join(':');
+
+      if (url.startsWith('http') || url.startsWith('blob')) {
+          const tempId = `IMG_${imgCounter++}`;
+          
+          tempUploadedImages.value[tempId] = url;
+          imageSizes[tempId] = width ? parseInt(width) : 100;
+          
+          let newTag = `[img:${tempId}`;
+          if (align) newTag += `:${align}`;
+          else if (width) newTag += `:l`; 
+          if (width) newTag += `:${width}`;
+          newTag += ']';
+          return newTag;
+      }
+      return match;
+  });
+
+  inputRawText.value = processedText;
   parseTemplate();
 };
 
@@ -338,53 +366,61 @@ const loadFromCache = (modeIndex) => {
     inputRawText.value = '';
 };
 
-const adjustImgPos = (id, dx, dy) => {
-    const text = inputRawText.value;
-    const lines = text.split('\n');
-    let targetLineIdx = -1;
-    let currentCode = 'bm'; 
-    for (let i = 0; i < lines.length; i++) {
-        if (lines[i].trim().startsWith('##配图') && lines[i].includes(id)) {
-            targetLineIdx = i;
-            const content = lines[i].trim().substring(4).trim();
-            const match = content.match(/^([a-z]+)?(.+)$/i);
-            if (match && match[1]) currentCode = match[1];
-            break;
-        }
+const insertImgPlaceholder = (id) => {
+    const size = imageSizes[id] || 100;
+    const placeholder = `[img:${id}:l:${size}]`;
+    const textarea = document.querySelector('.raw-editor textarea') || document.querySelector('.raw-editor');
+    
+    if (textarea && textarea.setRangeText) {
+        const start = textarea.selectionStart || inputRawText.value.length;
+        const end = textarea.selectionEnd || start;
+        const text = inputRawText.value;
+        inputRawText.value = text.substring(0, start) + placeholder + text.substring(end);
+        nextTick(() => {
+            textarea.focus();
+            textarea.setSelectionRange(start + placeholder.length, start + placeholder.length);
+        });
+    } else {
+        inputRawText.value += '\n' + placeholder;
     }
-    if (targetLineIdx === -1) return uni.showToast({title: '未在编辑器找到该图片ID', icon: 'none'});
-    let isMCQ = false;
-    for (let i = targetLineIdx; i >= 0; i--) {
-        if (lines[i].trim().startsWith('##题型')) { isMCQ = lines[i].includes('选'); break; }
-        if (lines[i].trim() === '===') break;
-    }
-    let newCode = calculateNewPos(currentCode, dx, dy, isMCQ);
-    lines[targetLineIdx] = `##配图 ${newCode}${id}`;
-    inputRawText.value = lines.join('\n');
     manualParse();
 };
 
-const calculateNewPos = (code, dx, dy, isMCQ) => {
-    if (code === 'r') { if (dx === -1) return 'mr'; return 'r'; }
-    let v = code.charAt(0); let h = code.charAt(1) || 'm'; 
-    const vMap = isMCQ ? ['u', 'm', 'b'] : ['u', 'b'];
-    if (dy !== 0) {
-        let idx = vMap.indexOf(v);
-        if (idx === -1) idx = vMap.length - 1;
-        idx += dy;
-        if (idx < 0) idx = 0; if (idx >= vMap.length) idx = vMap.length - 1;
-        v = vMap[idx];
-    }
-    const hMap = ['l', 'm', 'r'];
-    if (dx !== 0) {
-        let idx = hMap.indexOf(h);
-        if (idx === -1) idx = 1;
-        if (h === 'r' && dx === 1) return 'r'; 
-        idx += dx;
-        if (idx < 0) idx = 0; if (idx >= hMap.length) idx = hMap.length - 1;
-        h = hMap[idx];
-    }
-    return v + h;
+const updateImgAlign = (id, align) => {
+    updateTag(id, align, null);
+};
+
+const handleSizeChange = (id, e) => {
+    const val = parseInt(e.detail.value || e.target.value);
+    imageSizes[id] = val;
+    updateTag(id, null, val);
+};
+
+const updateTag = (id, newAlign, newWidth) => {
+    let text = inputRawText.value;
+    
+    inputRawText.value = text.replace(/\[img:([^\]]+)\]/g, (match, innerContent) => {
+        const parts = innerContent.split(':');
+        
+        let pWidth = null;
+        let pAlign = null;
+        const tempParts = [...parts];
+        
+        if (tempParts.length > 1 && /^\d+$/.test(tempParts[tempParts.length-1])) pWidth = tempParts.pop();
+        if (tempParts.length > 1 && /^[lmr]$/.test(tempParts[tempParts.length-1])) pAlign = tempParts.pop();
+        
+        const currentId = tempParts.join(':');
+        
+        if (currentId === id) {
+            const finalAlign = newAlign !== null ? newAlign : (pAlign || 'l'); 
+            const finalWidth = newWidth !== null ? newWidth : (pWidth || (imageSizes[id] || 100));
+            imageSizes[id] = parseInt(finalWidth);
+            return `[img:${id}:${finalAlign}:${finalWidth}]`;
+        }
+        return match;
+    });
+    
+    manualParse(); 
 };
 
 const manualParse = () => { parseTemplate(); };
@@ -488,15 +524,13 @@ const parseSingleChunk = (chunkText, chunkStartOffset = 0) => {
     const lines = chunkText.split('\n');
     const result = {};
     let currentModule = '';
-    // [修改] 增加 详解
     const multiLineModules = ['题干', '分析', '答案', '选项', '详解'];
     
     const qData = {
         id: '', year: '2023', source: '新高考', difficulty: 3, type: '单选题', qNumber: '1',
-        title: '', image: '', answer: '', analysis: '', detailed: '',
+        title: '', answer: '', analysis: '', detailed: '',
         optionLayout: 4, options: {}, optionRows: [],
         categoryIds: [], tags: [], showAnswer: true,
-        imgPosCode: 'bm', imgAlign: 'center', imgId: '',
         province: '', region: '', 
         _regionErr: null
     };
@@ -527,7 +561,6 @@ const parseSingleChunk = (chunkText, chunkStartOffset = 0) => {
                         for (const input of inputs) {
                             const raw = input.trim();
                             if (!raw) continue;
-                            // [修改] 使用 PROVINCE_LIST 进行匹配，支持前缀匹配
                             const matched = PROVINCE_LIST.find(p => p === raw || raw.startsWith(p));
                             if (matched) validProvincesFound.push(matched);
                             else { hasError = true; qData._regionErr = { start: absStart, end: absEnd, msg: `"${raw}" 不是支持的省份` }; break; }
@@ -543,13 +576,39 @@ const parseSingleChunk = (chunkText, chunkStartOffset = 0) => {
         } else {
             if (currentModule) {
                 if (trimmed === '//') result[currentModule].push('');
-                else if (trimmed) result[currentModule].push(line.trim());
+                else if (trimmed) result[currentModule].push(line); 
             }
         }
         charCount += lineLen;
     });
 
-    const getVal = (key) => result[key] ? result[key].join(multiLineModules.includes(key) ? '\n' : '/') : '';
+    const getVal = (key) => {
+        if (!result[key]) return '';
+        const rawStr = result[key].join(multiLineModules.includes(key) ? '\n' : '/');
+        
+        return rawStr.replace(/\[img:([^\]]+)\]/g, (match, innerContent) => {
+            const parts = innerContent.split(':');
+            let width = null;
+            let align = null;
+            
+            if (parts.length > 1 && /^\d+$/.test(parts[parts.length - 1])) width = parts.pop();
+            if (parts.length > 1 && /^[lmr]$/.test(parts[parts.length - 1])) align = parts.pop();
+            
+            const id = parts.join(':');
+            const url = tempUploadedImages.value[id];
+            
+            if (url) {
+                let newTag = `[img:${url}`;
+                if (align) newTag += `:${align}`;
+                else if (width) newTag += `:l`; 
+                
+                if (width) newTag += `:${width}`;
+                newTag += `]`;
+                return newTag;
+            }
+            return match; 
+        });
+    };
 
     qData.year = getVal('年份'); 
     qData.source = getVal('来源'); qData.qNumber = getVal('题号');
@@ -562,49 +621,46 @@ const parseSingleChunk = (chunkText, chunkStartOffset = 0) => {
     const tagRaw = getVal('标签');
     qData.tags = tagRaw ? tagRaw.split('/').map(t=>t.trim()).filter(x=>x) : [];
 
-    const imgRaw = getVal('配图');
-    if (imgRaw) {
-        const match = imgRaw.match(/^([a-z]+)?(.+)$/i);
-        if (match) {
-            let code = match[1] || 'bm'; 
-            const id = match[2];
-            qData.imgId = id;
-            qData.imgPosCode = code;
-            if (code === 'r') { qData.imgAlign = 'side-right'; } 
-            else {
-                const h = code.charAt(1) || 'm';
-                if (h === 'l') qData.imgAlign = 'left';
-                else if (h === 'r') qData.imgAlign = 'right';
-                else qData.imgAlign = 'center';
-            }
-            if (tempUploadedImages.value[id]) qData.image = tempUploadedImages.value[id];
-            else if (id === 'EXISTING') qData.image = tempUploadedImages.value['EXISTING'];
-        }
-    }
-
     if (qData.type.includes('选')) {
         const optLines = result['选项'] || [];
         let targetCols = 4;
-        const rawOptions = [];
-        if (optLines.length > 0 && /^\d+$/.test(optLines[0])) { targetCols = parseInt(optLines[0]); optLines.shift(); }
-        optLines.forEach(line => {
-            const parts = line.split(/([A-Z][.、])/).filter(x=>x);
-            for(let i=0; i<parts.length; i+=2) {
-                if(i+1 < parts.length) {
-                    const k = parts[i].replace(/[.、]/, '').trim();
-                    const v = parts[i+1].trim();
-                    rawOptions.push({ key: k, value: v });
-                    qData.options[k] = v;
-                }
-            }
+        let startIdx = 0;
+        if (optLines.length > 0 && /^\d+$/.test(optLines[0].trim())) { 
+            targetCols = parseInt(optLines[0].trim()); 
+            startIdx = 1;
+        }
+        
+        let optFullText = optLines.slice(startIdx).join('\n');
+        
+        optFullText = optFullText.replace(/\[img:([^\]]+)\]/g, (match, inner) => {
+             const parts = inner.split(':');
+             let w=null, a=null;
+             if(parts.length>1 && /^\d+$/.test(parts[parts.length-1])) w=parts.pop();
+             if(parts.length>1 && /^[lmr]$/.test(parts[parts.length-1])) a=parts.pop();
+             const id = parts.join(':');
+             const url = tempUploadedImages.value[id];
+             return url ? `[img:${url}:${a||'l'}:${w||''}]` : match;
         });
+
+        const rawOptions = [];
+        const parts = optFullText.split(/([A-Z][.、])/).filter(x=>x && x.trim());
+        
+        for(let i=0; i<parts.length; i+=2) {
+            if(i+1 < parts.length) {
+                const k = parts[i].replace(/[.、]/, '').trim();
+                const v = parts[i+1].trim();
+                rawOptions.push({ key: k, value: v });
+                qData.options[k] = v;
+            }
+        }
         qData.optionLayout = targetCols;
         qData.optionRows = distributeOptions(rawOptions, targetCols);
     } else { qData.options = {}; qData.optionRows = []; }
 
     qData.analysis = getVal('分析');
     qData.answer = getVal('答案');
-    qData.detailed = getVal('详解'); // [新增]
+    qData.detailed = getVal('详解');
+    
     return qData;
 };
 
@@ -618,7 +674,6 @@ const distributeOptions = (options, colCount) => {
     return resultRows;
 };
 
-// ... (Editor Functions 保持不变) ...
 const updateCursorPos = (e) => {
     if (document) {
         const el = document.querySelector('.raw-editor textarea') || document.querySelector('.raw-editor');
@@ -678,8 +733,9 @@ const uploadFileObj = (filePath) => {
         success: (upRes) => {
             const d = JSON.parse(upRes.data);
             if(d.url) {
-                const id = Math.floor(1000000 + Math.random() * 9000000).toString();
+                const id = 'IMG_' + Math.floor(100 + Math.random() * 900); 
                 tempUploadedImages.value[id] = d.url;
+                imageSizes[id] = 100; 
                 uni.showToast({title: '上传成功 ID:'+id, icon:'none'});
             }
         },
@@ -708,8 +764,6 @@ const handlePasteGlobal = (e) => {
 onMounted(() => { window.addEventListener('paste', handlePasteGlobal); });
 onUnmounted(() => { window.removeEventListener('paste', handlePasteGlobal); });
 
-const moveImage = (dx, dy) => { imageOffset.x += dx; imageOffset.y += dy; };
-const resetImagePos = () => { imageOffset.x = 0; imageOffset.y = 0; };
 const copyId = (id) => { uni.setClipboardData({ data: id, success: () => uni.showToast({title: '已复制', icon: 'none'}) }); };
 
 const handlePreviewBgClick = () => {
@@ -736,12 +790,9 @@ const handleSave = async () => {
   uni.showLoading({ title: '保存中' });
   try {
       for (const item of previewList.value) {
-          if (item.image && item.imgPosCode !== 'bm') {
-              const sep = item.image.includes('?') ? '&' : '?';
-              item.image += `${sep}pos=${item.imgPosCode}`;
-          }
           const payload = { ...item, subjectId: props.subjectId };
-          delete payload.optionRows; delete payload.showAnswer; delete payload.imgPosCode; delete payload.imgAlign; delete payload.imgId;
+          delete payload.optionRows; delete payload.showAnswer; 
+          delete payload.imgPosCode; delete payload.imgAlign; delete payload.imgId;
           delete payload._regionErr; delete payload.region; 
           
           if(item.id) await updateQuestion(item.id, payload);
@@ -752,6 +803,7 @@ const handleSave = async () => {
       emit('saved');
   } catch(e) {
       uni.hideLoading();
+      console.error(e);
       uni.showToast({title:'保存失败', icon:'none'});
   }
 };
@@ -763,12 +815,10 @@ defineExpose({ open });
 </script>
 
 <style scoped>
-/* (Header, Nav, Editor 样式保持不变) */
 .add-modal-header { background: #f9f9f9; padding: 10px 15px; border-bottom: 1px solid #eee; display: flex; flex-shrink: 0; justify-content: space-between; align-items: center; }
 .header-btns { display: flex; gap: 10px; }
 .header-info { text-align: right; }
 .status-text { font-size: 12px; color: #64748b; font-weight: bold; }
-.shortcut-tips { font-size: 11px; color: #999; margin-top: 2px; }
 .menu-btn { padding: 6px 20px; border-radius: 20px; font-size: 13px; cursor: pointer; border: 1px solid #ccc; background: white; }
 .menu-btn.primary { background: #2563eb; color: white; border-color: #2563eb; }
 .four-col-layout { display: flex; height: 700px; border-top: 1px solid #eee; overflow: hidden; }
@@ -782,11 +832,6 @@ defineExpose({ open });
 .col-editor { width: 25%; border-right: 1px solid #eee; display: flex; flex-direction: column; padding: 10px; position: relative; min-width: 250px; overflow-y: auto; height: 100%; box-sizing: border-box; }
 .editor-wrap { flex: 1; position: relative; border: 1px solid #e2e8f0; border-radius: 4px; overflow: hidden; min-height: 500px; }
 .raw-editor { width: 100%; height: 100%; padding: 10px; box-sizing: border-box; font-family: monospace; font-size: 14px; line-height: 1.6; border: none; outline: none; resize: none; }
-.kp-dropdown { position: absolute; width: 200px; background: white; box-shadow: 0 4px 12px rgba(0,0,0,0.15); border: 1px solid #eee; z-index: 50; max-height: 200px; overflow-y: auto; border-radius: 4px; }
-.kp-item { padding: 8px 12px; font-size: 13px; border-bottom: 1px solid #f9f9f9; cursor: pointer; display: flex; align-items: center; }
-.kp-item:hover, .kp-item.active { background: #eff6ff; color: #2563eb; }
-.idx-badge { background: #e2e8f0; color: #64748b; font-size: 10px; width: 16px; height: 16px; border-radius: 4px; display: flex; align-items: center; justify-content: center; margin-right: 8px; }
-.header-tip { color: #999; font-size: 11px; background: #f1f1f1; cursor: default; padding: 5px 12px; }
 .col-preview { width: 50%; border-right: 1px solid #eee; display: flex; flex-direction: column; background: #f8fafc; min-width: 400px; position: relative; overflow-y: auto; height: 100%; box-sizing: border-box; }
 .convert-bar { position: absolute; left: 0; top: 50%; transform: translate(-50%, -50%); z-index: 10; }
 .convert-btn { background: #2563eb; color: white; width: 24px; height: 60px; display: flex; align-items: center; justify-content: center; border-radius: 0 4px 4px 0; cursor: pointer; writing-mode: vertical-rl; border: none; box-shadow: 2px 0 5px rgba(0,0,0,0.1); }
@@ -797,7 +842,6 @@ defineExpose({ open });
 .mb-4 { margin-bottom: 16px; }
 .q-header { display: flex; justify-content: space-between; font-size: 12px; color: #64748b; margin-bottom: 10px; }
 .meta-left { display: flex; gap: 6px; flex-wrap: wrap; }
-/* [优化] 头部信息圆角矩形样式 */
 .info-chip { padding: 2px 8px; border-radius: 4px; background: #f1f5f9; color: #64748b; font-size: 11px; display: flex; align-items: center; }
 .info-chip.type { color: #2563eb; background: #eff6ff; font-weight: bold; }
 .info-chip.diff { color: #f59e0b; background: #fffbeb; }
@@ -805,18 +849,9 @@ defineExpose({ open });
 .info-chip.prov { background: #f0fdf4; color: #166534; }
 .info-chip.year { background: #eef2ff; color: #4338ca; }
 .info-chip.num { font-family: monospace; }
-.m-diff { color: #f59e0b; }
 .seq-num { font-weight: bold; color: #cbd5e1; }
 .q-title { display: block; width: 100%; font-size: 15px; line-height: 1.6; color: #1e293b; }
 .body-row { display: flex; margin-bottom: 10px; }
-.img-container { margin: 10px 0; display: flex; width: 100%; }
-.img-container.align-left { justify-content: flex-start; }
-.img-container.align-center { justify-content: center; }
-.img-container.align-right { justify-content: flex-end; }
-.q-image { max-width: 100%; border: 1px solid #eee; border-radius: 4px; }
-.layout-side-right { display: flex; gap: 15px; align-items: flex-start; }
-.layout-side-right .content-wrapper { flex: 1; }
-.layout-side-right .side-img-container { width: 30%; max-width: 200px; flex-shrink: 0; }
 .col-image { width: 25%; display: flex; flex-direction: column; padding: 10px; background: #fff; min-width: 250px; overflow-y: auto; height: 100%; box-sizing: border-box; }
 .uploaded-list { flex: 1; margin-bottom: 15px; }
 .img-item { border: 1px solid #eee; padding: 10px; border-radius: 6px; margin-bottom: 15px; background: #fcfcfc; }
@@ -824,29 +859,24 @@ defineExpose({ open });
 .thumb { width: 100%; height: 100%; }
 .img-id-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .img-id { font-size: 13px; font-weight: bold; color: #2563eb; background: #eff6ff; padding: 2px 6px; border-radius: 4px; user-select: all; }
-.copy-btn { font-size: 12px; color: #64748b; cursor: pointer; text-decoration: underline; }
-.img-move-row { display: flex; gap: 6px; align-items: center; justify-content: center; }
-.move-btn { width: 24px; height: 24px; background: #fff; border: 1px solid #cbd5e1; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 12px; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,0.05); user-select: none;}
-.move-btn:active { background: #f1f5f9; transform: translateY(1px); }
-.reset-link { font-size: 12px; color: #ef4444; margin-left: 5px; cursor: pointer; }
+.copy-btn { font-size: 12px; color: #2563eb; cursor: pointer; text-decoration: underline; font-weight: bold;}
 .upload-area { border: 2px dashed #cbd5e1; border-radius: 8px; height: 100px; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; background: #f8fafc; flex-shrink: 0; outline: none; }
 .upload-area:focus { border-color: #2563eb; background: #eff6ff; }
 .upload-icon { font-size: 28px; margin-bottom: 6px; }
 .upload-text { font-size: 11px; color: #64748b; }
 .opt-container { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; color: #334155; }
 .opt-row { display: flex; gap: 10px; width: 100%; }
-.opt-item { flex: 1; display: flex; align-items: flex-start; font-size: 14px; }
-.opt-key { font-weight: bold; margin-right: 5px; flex-shrink: 0; margin-top: 0; line-height: 1.6; }
+.opt-item { flex: 1; display: flex; align-items: center; font-size: 14px; } /* 关键修改：flex-start -> center */
+.opt-key { font-weight: bold; margin-right: 8px; flex-shrink: 0; line-height: 1.6; } /* 移除了 margin-top */
 .opt-val { flex: 1; word-break: break-all; }
-.opt-item :deep(.latex-text-container) { display: inline-block; width: auto; }
-/* [修改] 答案/分析样式优化 */
+.opt-item :deep(.latex-text-container) { display: inline-block; width: auto; vertical-align: middle; }
 .answer-box { background: #f0f9ff; padding: 12px 15px; border-radius: 6px; border: 1px dashed #bae6fd; font-size: 14px; color: #0c4a6e; }
 .ans-block { margin-bottom: 12px; }
 .ans-block:last-child { margin-bottom: 0; }
 .ans-tag { display: inline-block; padding: 2px 8px; border-radius: 4px; color: white; font-size: 12px; font-weight: bold; margin-bottom: 4px; }
-.ans-tag.answer { background-color: #2563eb; }   /* 蓝色 */
-.ans-tag.analysis { background-color: #f59e0b; } /* 橙色 */
-.ans-tag.detailed { background-color: #10b981; } /* 绿色 */
+.ans-tag.answer { background-color: #2563eb; } 
+.ans-tag.analysis { background-color: #f59e0b; } 
+.ans-tag.detailed { background-color: #10b981; } 
 .ans-content { font-size: 14px; line-height: 1.6; color: #334155; }
 .q-footer { border-top: 1px solid #f1f5f9; margin-top: 10px; padding-top: 8px; display: flex; justify-content: space-between; align-items: center; }
 .toggle-ans-btn { font-size: 12px; color: #64748b; cursor: pointer; padding: 2px 6px; border-radius: 4px; background: #f1f5f9; }
@@ -855,4 +885,57 @@ defineExpose({ open });
 .tag-badge { font-size: 11px; padding: 2px 6px; border-radius: 4px; cursor: pointer; }
 .tag-badge.red { background: #fef2f2; color: #ef4444; border: 1px solid #fee2e2; }
 .tag-badge.blue { background: #eff6ff; color: #3b82f6; border: 1px solid #dbeafe; }
+.img-ctrl-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+  border-top: 1px dashed #eee;
+  padding-top: 8px;
+}
+.ctrl-lbl {
+  font-size: 11px;
+  color: #94a3b8;
+  width: 30px;
+}
+.align-group {
+  display: flex;
+  gap: 4px;
+}
+.align-btn {
+  width: 40px; 
+  height: 24px;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  cursor: pointer;
+  color: #64748b;
+}
+.align-btn:hover {
+  border-color: #2563eb;
+  color: #2563eb;
+  background: #eff6ff;
+}
+.slider-box {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.size-slider {
+  flex: 1;
+  height: 20px;
+  cursor: pointer;
+}
+.size-val {
+  font-size: 11px;
+  color: #2563eb;
+  font-weight: bold;
+  width: 35px;
+  text-align: right;
+}
 </style>

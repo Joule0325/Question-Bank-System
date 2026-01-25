@@ -741,8 +741,8 @@ page { height: 100%; overflow: hidden; font-family: "Times New Roman", "SimSun",
 .q-title { flex: 1; font-size: 15px; line-height: 1.6; color: #1e293b; }
 .q-img { max-width: 100%; border: 1px solid #eee; border-radius: 4px; }
 .opt-grid { display: grid; gap: 8px; font-size: 14px; margin-bottom: 10px; color: #334155; }
-.opt-key { font-weight: bold; margin-right: 5px; flex-shrink: 0; margin-top: 3px; font-size: 16px; line-height: 1.8;}
-.opt-item { display: flex; align-items: flex-start; margin-bottom: 8px; }
+.opt-key { font-weight: bold; margin-right: 5px; flex-shrink: 0; font-size: 16px;}
+.opt-item { display: flex; align-items: center; margin-bottom: 8px; }
 .opt-item :deep(.latex-text-container) { flex: 1; width: auto; }
 /* [优化] 答案/分析样式 */
 .answer-box { background: #f0f9ff; padding: 12px 15px; border-radius: 6px; border: 1px dashed #bae6fd; font-size: 14px; color: #0c4a6e; }
@@ -780,8 +780,8 @@ page { height: 100%; overflow: hidden; font-family: "Times New Roman", "SimSun",
 .t-lbl { font-size: 10px; }
 .divider { width: 40px; height: 1px; background: #e2e8f0; margin: 10px 0 20px; }
 .basket-col { display: flex; flex-direction: column; gap: 8px; }
-.basket-circle { width: 40px; height: 40px; border-radius: 50%; background: white; border: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: center; position: relative; cursor: pointer; color: #64748b; font-weight: bold; }
-.basket-circle:hover { border-color: #2563eb; color: #2563eb; }
+.basket-circle { width: 48px; height: 40px; border-radius: 8px; background: white; border: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: center; position: relative; cursor: pointer; color: #64748b; font-weight: bold; }
+.basket-circle:hover { border-color: #2563eb; color: #2563eb; background: #eff6ff; }
 .badge { position: absolute; top: -2px; right: -2px; background: #ef4444; color: white; font-size: 9px; width: 16px; height: 16px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
 .basket-scroll { max-height: 60vh; }
 .basket-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-size: 13px; }
