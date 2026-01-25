@@ -256,6 +256,7 @@
         :knowledgeList="flatLeaves" 
         @saved="handleQuestionSaved" 
     />
+    <ExportQuestionsModal v-model:visible="showExportModal" />
 
     <CommonModal :isOpen="activeBasketId!==null" :title="'试题篮 '+activeBasketId" maxWidth="600px" @close="activeBasketId=null">
       <view class="row-btw mb-2"><text>共 {{ baskets[activeBasketId]?.length||0 }} 题</text><text class="link-btn" @click="exportLatex">导出LaTeX</text></view>
@@ -276,6 +277,7 @@ import CommonModal from '@/components/CommonModal.vue';
 import LatexText from '@/components/LatexText.vue';
 import Whiteboard from '@/components/Whiteboard.vue';
 import AddQuestionModal from '@/components/AddQuestionModal.vue';
+import ExportQuestionsModal from '@/components/ExportQuestionsModal.vue';
 import ManageSubjectModal from '@/components/ManageSubjectModal.vue';
 import ManageContentModal from '@/components/ManageContentModal.vue';
 
@@ -315,6 +317,7 @@ const isFilterExpanded = ref(true);
 const showAddModal = ref(false);
 const showSubjectModal = ref(false);
 const showContentModal = ref(false);
+const showExportModal = ref(false); // [Added]
 const addModalRef = ref(null);
 
 const activeBasketId = ref(null);
@@ -628,7 +631,7 @@ const handleDelete = async (id) => { uni.showModal({ content: '确定删除?', s
 const toggleWaiting = (id) => waitingBasketKey.value = waitingBasketKey.value === id ? null : id;
 const handleKeyBasket = (e) => { if(waitingBasketKey.value && e.key >= '1' && e.key <= '7') { const k = parseInt(e.key); const q = questions.value.find(x => x.id === waitingBasketKey.value); if(q && !baskets.value[k].find(x => x.id === q.id)) baskets.value[k].push(q); waitingBasketKey.value = null; } if(e.key === 'Escape') waitingBasketKey.value = null; };
 const removeFromBasket = (bid, qid) => baskets.value[bid] = baskets.value[bid].filter(x => x.id !== qid);
-const exportLatex = () => uni.showToast({title:'导出成功'});
+const exportLatex = () => { showExportModal.value = true; };
 const getKnowledgeTags = (ids) => ids.map(id => flatLeaves.value.find(l => l.id === id) || {id, title:id}).filter(x=>x);
 const toggleAnswer = (id) => showAnswerMap.value[id] = !showAnswerMap.value[id];
 const handleGlobalClick = (e) => {
