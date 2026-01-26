@@ -3,6 +3,8 @@
     "sass": "^1.97.2"
   },
   "dependencies": {
+    "file-saver": "^2.0.5",
+    "jszip": "^3.10.1",
     "perfect-freehand": "^1.2.0"
   }
 }

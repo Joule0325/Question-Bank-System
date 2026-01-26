@@ -256,7 +256,11 @@
         :knowledgeList="flatLeaves" 
         @saved="handleQuestionSaved" 
     />
-    <ExportQuestionsModal v-model:visible="showExportModal" />
+    
+    <ExportQuestionsModal 
+        v-model:visible="showExportModal" 
+        :questions="questionsForExport"
+    />
 
     <CommonModal :isOpen="activeBasketId!==null" :title="'试题篮 '+activeBasketId" maxWidth="600px" @close="activeBasketId=null">
       <view class="row-btw mb-2"><text>共 {{ baskets[activeBasketId]?.length||0 }} 题</text><text class="link-btn" @click="exportLatex">导出LaTeX</text></view>
@@ -317,7 +321,7 @@ const isFilterExpanded = ref(true);
 const showAddModal = ref(false);
 const showSubjectModal = ref(false);
 const showContentModal = ref(false);
-const showExportModal = ref(false); // [Added]
+const showExportModal = ref(false);
 const addModalRef = ref(null);
 
 const activeBasketId = ref(null);
@@ -340,6 +344,14 @@ const totalPages = computed(() => Math.ceil(questions.value.length / itemsPerPag
 const displayedQuestions = computed(() => questions.value.slice((currentPage.value-1)*itemsPerPage.value, currentPage.value*itemsPerPage.value));
 
 const provinceOptionsWithAll = computed(() => ['全部', ...provinceOptions.value]);
+
+// [修改处：新增] 计算当前需要导出的题目（默认导出当前打开的试题篮）
+const questionsForExport = computed(() => {
+    if (activeBasketId.value && baskets.value[activeBasketId.value]) {
+        return baskets.value[activeBasketId.value];
+    }
+    return [];
+});
 
 const allActiveFilters = computed(() => {
     const list = [];
@@ -728,7 +740,6 @@ page { height: 100%; overflow: hidden; font-family: "Times New Roman", "SimSun",
 .q-card { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
 .q-header { display: flex; justify-content: space-between; font-size: 12px; color: #64748b; margin-bottom: 10px; }
 .meta-left { display: flex; gap: 6px; flex-wrap: wrap; }
-/* [优化] 头部信息圆角矩形样式 */
 .info-chip { padding: 2px 8px; border-radius: 4px; background: #f1f5f9; color: #64748b; font-size: 11px; display: flex; align-items: center; }
 .info-chip.type { color: #2563eb; background: #eff6ff; font-weight: bold; }
 .info-chip.diff { color: #f59e0b; background: #fffbeb; }
@@ -747,7 +758,6 @@ page { height: 100%; overflow: hidden; font-family: "Times New Roman", "SimSun",
 .opt-key { font-weight: bold; margin-right: 5px; flex-shrink: 0; font-size: 16px;}
 .opt-item { display: flex; align-items: center; margin-bottom: 8px; }
 .opt-item :deep(.latex-text-container) { flex: 1; width: auto; }
-/* [优化] 答案/分析样式 */
 .answer-box { background: #f0f9ff; padding: 12px 15px; border-radius: 6px; border: 1px dashed #bae6fd; font-size: 14px; color: #0c4a6e; }
 .ans-block { margin-bottom: 12px; }
 .ans-block:last-child { margin-bottom: 0; }
@@ -763,11 +773,9 @@ page { height: 100%; overflow: hidden; font-family: "Times New Roman", "SimSun",
 .tag-badge.blue { background: #eff6ff; color: #3b82f6; border: 1px solid #dbeafe; }
 .footer-right { display: flex; align-items: center; gap: 10px; }
 .hash-code { font-family: monospace; color: #cbd5e1; font-size: 11px; }
-/* [优化] 试题篮按钮改为圆角矩形 */
 .basket-add-btn-rect { padding: 4px 10px; border-radius: 4px; border: 1px solid #2563eb; color: #2563eb; font-size: 11px; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; font-weight: 500; }
 .basket-add-btn-rect:hover { background: #eff6ff; }
 .basket-add-btn-rect.waiting { background: #2563eb; color: white; animation: pulse 1s infinite; }
-/* [优化] 图片布局样式 */
 .img-container { margin: 10px 0; display: flex; width: 100%; }
 .img-container.align-left { justify-content: flex-start; }
 .img-container.align-center { justify-content: center; }

@@ -2,7 +2,6 @@
   <view class="export-modal-mask" v-if="visible" @click.self="close">
     <view class="export-modal-container">
       
-      <!-- Header -->
       <view class="modal-header">
         <view class="mode-switch">
           <view 
@@ -21,15 +20,15 @@
           </view>
         </view>
         <view class="header-actions">
-          <button class="action-btn primary" @click="handleExport">导出</button>
+          <button class="action-btn primary" @click="handleExport" :disabled="isExporting">
+            {{ isExporting ? '打包中...' : '导出 ZIP' }}
+          </button>
           <button class="action-btn danger" @click="close">关闭</button>
         </view>
       </view>
 
-      <!-- Main Body -->
       <view class="modal-body">
         
-        <!-- Left Column: Source -->
         <view class="col col-source">
           <view class="col-title">LaTeX 源码</view>
           <textarea 
@@ -40,28 +39,10 @@
           ></textarea>
         </view>
 
-        <!-- Middle Column: Preview -->
-        <view class="col col-preview">
-          <view class="col-title">预览</view>
-          <view class="preview-stage">
-            <view class="paper-sheet">
-              <view class="paper-content">
-                <text class="preview-title">数学测试</text>
-                <view class="preview-q">
-                  <text>1. 求解 x:</text>
-                  <text class="math-eq">x² + 2x + 1 = 0</text>
-                </view>
-              </view>
-            </view>
-          </view>
-        </view>
-
-        <!-- Right Column: Settings -->
         <view class="col col-settings">
           <view class="col-title">导出设置</view>
           <scroll-view scroll-y class="settings-scroll">
             
-            <!-- Metadata -->
             <view class="setting-group">
               <text class="group-label">试题属性</text>
               <view class="checkbox-list">
@@ -79,7 +60,6 @@
               </view>
             </view>
 
-            <!-- Answer Placement -->
             <view class="setting-group">
               <text class="group-label">答案位置</text>
               <view class="radio-list">
@@ -102,7 +82,6 @@
               </view>
             </view>
 
-            <!-- Template -->
             <view class="setting-group">
               <text class="group-label">试卷模板</text>
               <view class="template-grid">
@@ -112,10 +91,8 @@
                   :key="tpl.id"
                   :class="{ selected: selectedTplId === tpl.id }"
                   @click="selectTemplate(tpl)"
-                  @dblclick="previewTemplate(tpl)"
                 >
                   <view class="tpl-thumb">
-                    <!-- Placeholder for PDF cover -->
                     <view class="thumb-placeholder"></view>
                   </view>
                   <text class="tpl-name">{{ tpl.name }}</text>
@@ -126,7 +103,6 @@
                   <text class="tpl-name">上传</text>
                 </view>
               </view>
-              <text class="tips">双击预览完整PDF，单击选中</text>
             </view>
 
           </scroll-view>
@@ -139,6 +115,8 @@
 
 <script setup>
 import { ref, reactive, watch } from 'vue';
+import JSZip from 'jszip';
+import { saveAs } from 'file-saver';
 
 const props = defineProps({
   visible: Boolean,
@@ -152,9 +130,13 @@ const emit = defineEmits(['update:visible', 'export']);
 
 const mode = ref('latex');
 const sourceCode = ref('');
+const isExporting = ref(false);
 
 const answerPos = ref('end');
 const selectedTplId = ref(1);
+
+// 图片资源映射表 { "save_filename.jpg": "http://download/url" }
+let imageAssets = {};
 
 const metadata = reactive({
   source: false,
@@ -177,45 +159,198 @@ const templates = ref([
   { id: 4, name: "作业\n练习" }
 ]);
 
-const generateLatex = () => {
-  if (!props.questions || props.questions.length === 0) {
-    sourceCode.value = `\\documentclass{ctexart}
-\\usepackage{amsmath}
-\\begin{document}
-% 暂无题目
-\\end{document}`;
-    return;
+/**
+ * 🌟 核心兼容逻辑 🌟
+ * 解决 404 的关键：
+ * 1. 下载链接 (downloadUrl)：完全信任原始数据，如果原始是 http://.../123 (无后缀)，就请求这个。
+ * 2. 保存文件名 (saveFilename)：强制加后缀，保证 ZIP 里是图片格式。
+ */
+const resolveImageInfo = (rawUrl) => {
+  // 1. 清洗 URL (去掉 query 参数)
+  const cleanUrl = rawUrl.split('?')[0];
+  
+  // 2. 获取原始文件名
+  let originalName = cleanUrl.split('/').pop(); // 例如 "123" 或 "456.jpg"
+  
+  // 3. 确定下载地址 (Download URL)
+  // 绝对不要瞎改 URL！数据库存什么就请求什么，否则后端 404
+  const downloadUrl = rawUrl; 
+
+  // 4. 确定保存文件名 (Save Filename)
+  // 必须保证有后缀，否则 LaTeX 报错
+  let saveFilename = originalName;
+  
+  // 如果原始名没有后缀，强行加 .jpg (兼容旧数据)
+  if (!saveFilename.includes('.')) {
+    saveFilename += '.jpg';
   }
 
-  let content = `\\documentclass{ctexart}
-\\usepackage{amsmath}
+  // 解码防止中文乱码
+  try { saveFilename = decodeURIComponent(saveFilename); } catch(e){}
+
+  return { saveFilename, downloadUrl };
+};
+
+const convertContentToLatex = (text) => {
+  if (!text) return '';
+  let latex = text;
+
+  // 处理自定义图片格式: [img:url:pos:scale]
+  const imgRegex = /\[img:(.*?):([lmr]):(\d+)\]/g;
+  latex = latex.replace(imgRegex, (match, rawUrl, pos, scale) => {
+    
+    // 调用兼容函数
+    const { saveFilename, downloadUrl } = resolveImageInfo(rawUrl);
+    
+    // 存入待下载列表: key=文件名(带后缀), value=下载地址(原始地址)
+    imageAssets[saveFilename] = downloadUrl;
+
+    // 解析对齐方式
+    let alignCmd = '\\centering'; 
+    if (pos === 'l') alignCmd = '\\raggedright';
+    if (pos === 'r') alignCmd = '\\raggedleft';
+
+    // 解析缩放
+    const widthVal = (parseInt(scale) / 100).toFixed(2);
+
+    return `
+\\begin{figure}[H]
+  ${alignCmd}
+  \\includegraphics[width=${widthVal}\\linewidth]{images/${saveFilename}}
+\\end{figure}
+`;
+  });
+
+  // 处理 Markdown 表格 (保持原始逻辑不变)
+  if (latex.includes('|')) {
+    const lines = latex.split('\n');
+    let inTable = false;
+    let tableLines = [];
+    let newLines = [];
+
+    const processTable = (tLines) => {
+        const contentLines = tLines.filter(l => !/^[\s|:-]+$/.test(l));
+        if (contentLines.length === 0) return '';
+
+        const firstLine = contentLines[0];
+        const cols = firstLine.split('|').filter(s => s.trim() !== '').length;
+        if (cols === 0) return '';
+        
+        const colSpec = '|' + Array(cols).fill('X<{\\centering}').join('|') + '|';
+
+        let tableBody = '';
+        contentLines.forEach(row => {
+            const cells = row.split('|');
+            const cleanCells = cells.filter((c, i) => {
+                 if ((i === 0 || i === cells.length - 1) && c.trim() === '') return false;
+                 return true;
+            });
+            const latexCells = cleanCells.map(c => c.trim()).join(' & ');
+            tableBody += `      ${latexCells} \\\\ \\hline\n`;
+        });
+
+        return `
+\\begin{table}[H]
+  \\centering
+  \\begin{tabularx}{\\linewidth}{${colSpec}}
+    \\hline
+${tableBody}  \\end{tabularx}
+\\end{table}
+`;
+    };
+
+    lines.forEach(line => {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
+            if (!inTable) inTable = true;
+            tableLines.push(trimmed);
+        } else {
+            if (inTable) {
+                newLines.push(processTable(tableLines));
+                tableLines = [];
+                inTable = false;
+            }
+            newLines.push(line);
+        }
+    });
+    if (inTable) {
+        newLines.push(processTable(tableLines));
+    }
+    
+    latex = newLines.join('\n');
+  }
+
+  // 基础清洗
+  latex = latex.replace(/&nbsp;/g, ' ');
+  latex = latex.replace(/<br\s*\/?>/g, ' \\\\\n');
+  latex = latex.replace(/<p[^>]*>/g, '\n\n').replace(/<\/p>/g, '');
+  latex = latex.replace(/<[^>]+>/g, '');
+  
+  return latex;
+};
+
+const generateLatex = () => {
+  imageAssets = {};
+  
+  let content = `\\documentclass[UTF8]{ctexart}
 \\usepackage{geometry}
 \\geometry{a4paper,scale=0.8}
+\\usepackage{amsmath}
+\\usepackage{amssymb}
+\\usepackage{graphicx}
+\\usepackage{float}
+\\usepackage{booktabs}
+\\usepackage{tabularx}
+\\usepackage{array}
+
+\\setlength{\\parindent}{0pt}
+\\setlength{\\parskip}{1em}
+
+\\title{数学测试试卷}
+\\author{}
+\\date{\\today}
 
 \\begin{document}
 
-\\section*{数学测试}
+\\maketitle
+
+\\section*{一、题目列表}
 
 `;
 
-  props.questions.forEach((q, index) => {
-    content += `\\paragraph{第${index + 1}题} ${q.title || ''}\n`;
-    
-    if (q.options) {
-        // Simple handling of options
-        content += `\\begin{itemize}\n`;
-        Object.keys(q.options).forEach(key => {
-            content += `  \\item[${key}.] ${q.options[key]}\n`;
-        });
-        content += `\\end{itemize}\n`;
-    }
-    content += `\n`;
-  });
+  if (!props.questions || props.questions.length === 0) {
+    content += `% 暂无题目数据\n`;
+  } else {
+    props.questions.forEach((q, index) => {
+      const qTitle = convertContentToLatex(q.title || '');
+      
+      content += `\\paragraph{第 ${index + 1} 题} \n`;
+      content += `${qTitle}\n`;
+      
+      if (q.options) {
+          content += `\\begin{itemize}\n`;
+          Object.keys(q.options).forEach(key => {
+              const optContent = convertContentToLatex(q.options[key]);
+              content += `  \\item[${key}.] ${optContent}\n`;
+          });
+          content += `\\end{itemize}\n`;
+      }
+      
+      if (answerPos.value === 'question') {
+         const qAns = convertContentToLatex(q.answer || '略');
+         content += `\\vspace{0.5cm}\\textbf{【答案】} ${qAns} \\\\\n`;
+         content += `\\vspace{0.5cm}\\hrule\\vspace{0.5cm}\n`;
+      } else {
+         content += `\\vspace{1cm}\n`;
+      }
+    });
+  }
 
-  if (answerPos.value === 'end') {
-      content += `\\newpage\n\\section*{答案}\n`;
+  if (answerPos.value === 'end' && props.questions && props.questions.length > 0) {
+      content += `\\newpage\n\\section*{二、参考答案}\n`;
       props.questions.forEach((q, index) => {
-          content += `\\textbf{${index + 1}.} ${q.answer || '略'} \\\\\n`;
+          const qAns = convertContentToLatex(q.answer || '略');
+          content += `\\textbf{${index + 1}.} ${qAns} \\\\\n`;
       });
   }
 
@@ -223,19 +358,76 @@ const generateLatex = () => {
   sourceCode.value = content;
 };
 
-watch(() => props.visible, (newVal) => {
-  if (newVal) {
-    generateLatex();
+// --- 导出逻辑 (修复了 Loading 配对问题) ---
+const handleExport = async () => {
+  if (isExporting.value) return;
+  
+  isExporting.value = true;
+  uni.showLoading({ title: '打包资源中...', mask: true });
+
+  try {
+    const zip = new JSZip();
+    zip.file("paper.tex", sourceCode.value);
+
+    const imgFolder = zip.folder("images");
+    const assetEntries = Object.entries(imageAssets);
+    
+    if (assetEntries.length > 0) {
+        console.log(`准备下载 ${assetEntries.length} 张图片...`);
+        
+        const downloadPromises = assetEntries.map(async ([saveFilename, downloadUrl]) => {
+          try {
+            console.log(`下载: ${downloadUrl} -> 保存为: ${saveFilename}`);
+            
+            // 使用原始 URL 下载
+            const res = await uni.request({
+              url: downloadUrl,
+              method: 'GET',
+              responseType: 'arraybuffer'
+            });
+            
+            if (res.statusCode === 200) {
+              imgFolder.file(saveFilename, res.data);
+            } else {
+              console.error(`Status Error ${res.statusCode}: ${downloadUrl}`);
+              imgFolder.file(saveFilename + "_error.txt", `HTTP ${res.statusCode}`);
+            }
+          } catch (e) {
+            console.error(`Network Error:`, e);
+            imgFolder.file(saveFilename + "_error.txt", "Net Error");
+          }
+        });
+
+        await Promise.all(downloadPromises);
+    }
+
+    const content = await zip.generateAsync({ type: "blob" });
+    saveAs(content, "latex_paper_export.zip");
+    
+    uni.showToast({ title: '导出成功', icon: 'success' });
+    emit('export');
+    
+  } catch (error) {
+    console.error('Export failed:', error);
+    uni.showToast({ title: '导出失败', icon: 'none' });
+  } finally {
+    // 确保 Loading 只关闭一次，解决控制台警告
+    if (isExporting.value) {
+        uni.hideLoading();
+        isExporting.value = false;
+    }
   }
+};
+
+watch(() => props.visible, (newVal) => {
+  if (newVal) generateLatex();
 });
 
 watch(() => props.questions, () => {
     if (props.visible) generateLatex();
 }, { deep: true });
 
-watch(answerPos, () => {
-    generateLatex();
-});
+watch(answerPos, generateLatex);
 
 const close = () => {
   emit('update:visible', false);
@@ -253,34 +445,13 @@ const selectTemplate = (tpl) => {
   selectedTplId.value = tpl.id;
 };
 
-const previewTemplate = (tpl) => {
-  uni.showToast({
-    title: `预览: ${tpl.name.replace('\n', '')}`,
-    icon: 'none'
-  });
-};
-
 const uploadTemplate = () => {
-  uni.showToast({
-    title: '上传功能待开发',
-    icon: 'none'
-  });
+  uni.showToast({ title: '上传功能待开发', icon: 'none' });
 };
-
-const handleExport = () => {
-  uni.showLoading({ title: '导出中...' });
-  setTimeout(() => {
-    uni.hideLoading();
-    uni.showToast({ title: '导出成功' });
-    emit('export');
-    close();
-  }, 1500);
-};
-
 </script>
 
 <style lang="scss" scoped>
-/* Font settings */
+/* 样式已完全恢复为第一次提供的原版 */
 .export-modal-container {
   font-family: "Times New Roman", "Songti SC", "SimSun", serif;
 }
@@ -298,7 +469,9 @@ const handleExport = () => {
 
 .export-modal-container {
   width: 1200px;
-  height: 800px;
+  max-width: 95vw;
+  height: auto;
+  max-height: 85vh;
   background-color: #F3F4F6;
   border-radius: 12px;
   display: flex;
@@ -309,7 +482,6 @@ const handleExport = () => {
   overflow: hidden;
 }
 
-/* Header */
 .modal-header {
   height: 60px;
   background: #FFFFFF;
@@ -358,13 +530,13 @@ const handleExport = () => {
     
     &.primary { background: #10B981; }
     &.primary:hover { background: #059669; }
+    &.primary:disabled { background: #6EE7B7; cursor: not-allowed; }
     
     &.danger { background: #EF4444; }
     &.danger:hover { background: #DC2626; }
   }
 }
 
-/* Body */
 .modal-body {
   flex: 1;
   display: flex;
@@ -393,9 +565,8 @@ const handleExport = () => {
   flex-shrink: 0;
 }
 
-/* Left Column */
 .col-source {
-  width: 380px;
+  flex: 1; 
   
   .source-editor {
     flex: 1;
@@ -404,7 +575,7 @@ const handleExport = () => {
     border: none;
     outline: none;
     resize: none;
-    font-family: 'Roboto Mono', 'Menlo', monospace; /* Code font exception */
+    font-family: 'Roboto Mono', 'Menlo', monospace;
     font-size: 13px;
     line-height: 1.6;
     color: #1F2937;
@@ -413,55 +584,6 @@ const handleExport = () => {
   }
 }
 
-/* Middle Column */
-.col-preview {
-  flex: 1;
-  background: #F3F4F6; /* Override white for gap */
-  
-  .preview-stage {
-    flex: 1;
-    display: flex;
-    justify-content: center;
-    padding: 24px;
-    overflow-y: auto;
-  }
-  
-  .paper-sheet {
-    width: 480px;
-    min-height: 640px;
-    background: #FFFFFF;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-    padding: 40px;
-    box-sizing: border-box;
-    
-    .paper-content {
-      color: #000000;
-      
-      .preview-title {
-        font-size: 18px;
-        font-weight: bold;
-        display: block;
-        text-align: center;
-        margin-bottom: 24px;
-      }
-      
-      .preview-q {
-        font-size: 15px;
-        line-height: 1.6;
-        
-        .math-eq {
-          display: block;
-          margin: 8px 0;
-          text-align: center;
-          font-family: "Times New Roman", serif;
-          font-style: italic;
-        }
-      }
-    }
-  }
-}
-
-/* Right Column */
 .col-settings {
   width: 300px;
   
@@ -626,14 +748,6 @@ const handleExport = () => {
           margin-bottom: 8px;
         }
       }
-    }
-    
-    .tips {
-      display: block;
-      width: 100%;
-      font-size: 11px;
-      color: #9CA3AF;
-      margin-top: 4px;
     }
   }
 }
