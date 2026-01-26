@@ -262,12 +262,18 @@
         :questions="questionsForExport"
     />
 
-    <CommonModal :isOpen="activeBasketId!==null" :title="'试题篮 '+activeBasketId" maxWidth="600px" @close="activeBasketId=null">
-      <view class="row-btw mb-2"><text>共 {{ baskets[activeBasketId]?.length||0 }} 题</text><text class="link-btn" @click="exportLatex">导出LaTeX</text></view>
-      <scroll-view scroll-y class="basket-scroll">
-        <view v-for="q in baskets[activeBasketId]||[]" :key="q.id" class="basket-row"><text class="trunc">#{{q.id}} {{q.title}}</text><text class="del-x" @click="removeFromBasket(activeBasketId, q.id)">✕</text></view>
-      </scroll-view>
-    </CommonModal>
+    <QuestionBasketModal 
+        :isOpen="activeBasketId !== null"
+        :basketId="activeBasketId"
+        :baskets="baskets"
+        :knowledgeList="flatLeaves" 
+        @close="activeBasketId = null"
+        @update:basketId="(id) => activeBasketId = id"
+        @remove="(qid) => removeFromBasket(activeBasketId, qid)"
+        @clear="(bid) => baskets[bid] = []"
+        @export-pdf="handleExportPdf"
+        @export-word="handleExportWord"
+    />
 
   </view>
 </template>
@@ -277,15 +283,15 @@ import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue';
 import { getSubjects, getCategories, getQuestions, deleteQuestion, getFilters } from '@/api/question.js';
 import { baseUrl } from '@/utils/request.js';
 import CategoryTree from '@/components/CategoryTree.vue';
-import CommonModal from '@/components/CommonModal.vue';
 import LatexText from '@/components/LatexText.vue';
 import Whiteboard from '@/components/Whiteboard.vue';
 import AddQuestionModal from '@/components/AddQuestionModal.vue';
 import ExportQuestionsModal from '@/components/ExportQuestionsModal.vue';
 import ManageSubjectModal from '@/components/ManageSubjectModal.vue';
 import ManageContentModal from '@/components/ManageContentModal.vue';
+// [新增引用]
+import QuestionBasketModal from '@/components/QuestionBasketModal.vue';
 
-// [新增] 定义所有省份列表
 const ALL_PROVINCES = [
     "北京", "天津", "上海", "重庆", "河北", "山西", "内蒙古", 
     "辽宁", "吉林", "黑龙江", "江苏", "浙江", "安徽", "福建", 
@@ -345,7 +351,6 @@ const displayedQuestions = computed(() => questions.value.slice((currentPage.val
 
 const provinceOptionsWithAll = computed(() => ['全部', ...provinceOptions.value]);
 
-// [修改处：新增] 计算当前需要导出的题目（默认导出当前打开的试题篮）
 const questionsForExport = computed(() => {
     if (activeBasketId.value && baskets.value[activeBasketId.value]) {
         return baskets.value[activeBasketId.value];
@@ -643,7 +648,17 @@ const handleDelete = async (id) => { uni.showModal({ content: '确定删除?', s
 const toggleWaiting = (id) => waitingBasketKey.value = waitingBasketKey.value === id ? null : id;
 const handleKeyBasket = (e) => { if(waitingBasketKey.value && e.key >= '1' && e.key <= '7') { const k = parseInt(e.key); const q = questions.value.find(x => x.id === waitingBasketKey.value); if(q && !baskets.value[k].find(x => x.id === q.id)) baskets.value[k].push(q); waitingBasketKey.value = null; } if(e.key === 'Escape') waitingBasketKey.value = null; };
 const removeFromBasket = (bid, qid) => baskets.value[bid] = baskets.value[bid].filter(x => x.id !== qid);
-const exportLatex = () => { showExportModal.value = true; };
+
+// 导出处理函数
+const handleExportPdf = () => {
+    showExportModal.value = true;
+    uni.showToast({ title: '准备导出PDF...', icon: 'none' });
+};
+const handleExportWord = () => {
+    showExportModal.value = true;
+    uni.showToast({ title: '准备导出Word...', icon: 'none' });
+};
+
 const getKnowledgeTags = (ids) => ids.map(id => flatLeaves.value.find(l => l.id === id) || {id, title:id}).filter(x=>x);
 const toggleAnswer = (id) => showAnswerMap.value[id] = !showAnswerMap.value[id];
 const handleGlobalClick = (e) => {
