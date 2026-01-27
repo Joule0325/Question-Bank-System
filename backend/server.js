@@ -153,7 +153,7 @@ app.get('/api/categories', async (req, res) => {
 });
 
 app.post('/api/categories/manage', async (req, res) => {
-    const { action, subjectId, parentId, data, id, sourceId, targetId, position, title } = req.body;
+    const { action, subjectId, parentId, data, id, sourceId, targetId, position, title, children } = req.body;
     try {
         if (action === 'add-root' || action === 'add-sub') {
             const newCat = new Category({ id: new mongoose.Types.ObjectId().toString(), subjectId, title: data.title, parentId: action === 'add-sub' ? parentId : null, order: Date.now() });
@@ -167,7 +167,58 @@ app.post('/api/categories/manage', async (req, res) => {
             const deleteIds = [id];
             const findChildren = async (pid) => { const kids = await Category.find({ parentId: pid }); for (const k of kids) { deleteIds.push(k.id); await findChildren(k.id); } };
             await findChildren(id); await Category.deleteMany({ id: { $in: deleteIds } });
-        } else if (action === 'update_list') { res.json({ success: true }); return; }
+        } else if (action === 'update_list') {
+    // 1. 获取前端传来的子目录列表
+    // 注意：需要在上面的 const { ... } = req.body 中加入 children，或者直接在这里从 req.body 取
+    const { children } = req.body; 
+
+    // 2. 确定操作范围：是某个父节点下的子目录，还是根目录
+    // 如果有 parentId，说明是更新子目录；如果没有，说明是更新该科目下的根目录
+    const query = parentId ? { parentId } : { subjectId, parentId: null };
+
+    // 3. 找出数据库中现有的目录 ID，用来对比删除
+    const existingDocs = await Category.find(query);
+    const existingIds = existingDocs.map(c => c.id);
+
+    // 4. 找出前端提交的列表中，哪些是老数据（ID不是 new_ 开头的）
+    const keepIds = children.filter(c => !c.id.toString().startsWith('new_')).map(c => c.id);
+
+    // 5. 计算出需要删除的 ID（数据库里有，但前端没传回来的）
+    const toDelete = existingIds.filter(eid => !keepIds.includes(eid));
+    if (toDelete.length > 0) {
+        // 简单处理：直接删除这些目录。如果需要级联删除子目录可在此扩展，但目前保持简单。
+        await Category.deleteMany({ id: { $in: toDelete } });
+    }
+
+    // 6. 遍历前端列表，执行“新增”或“更新”
+    for (let i = 0; i < children.length; i++) {
+        const item = children[i];
+        if (item.id.toString().startsWith('new_')) {
+            // --- 新增 ---
+            await new Category({
+                id: new mongoose.Types.ObjectId().toString(),
+                subjectId: subjectId, // 确保继承 SubjectID
+                parentId: parentId || null,
+                title: item.title,
+                color: item.color,
+                order: i // 使用当前的索引作为排序权重
+            }).save();
+        } else {
+            // --- 更新 ---
+            await Category.findOneAndUpdate(
+                { id: item.id },
+                { 
+                    title: item.title, 
+                    color: item.color,
+                    order: i 
+                }
+            );
+        }
+    }
+    
+    res.json({ success: true });
+    return;
+}
         res.json({ success: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
