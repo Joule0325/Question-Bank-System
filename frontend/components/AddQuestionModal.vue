@@ -100,8 +100,23 @@
             </view>
             <view class="q-footer">
               <view class="tags-row">
-                <view v-for="tag in getKnowledgeTags(item.categoryIds)" :key="tag.id" class="tag-badge red">🏷️ {{ tag.title }}</view>
-                <view v-for="tag in item.tags" :key="tag" class="tag-badge blue">🏷️ {{ tag }}</view>
+                <view v-for="tag in getKnowledgeTags(item.categoryIds)" :key="tag.id" class="tag-badge red">
+                  <image 
+                    src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMyIgaGVpZ2h0PSIyMyIgdmlld0JveD0iMCAwIDQ4IDQ4IiBmaWxsPSJub25lIj48cGF0aCBkPSJNOCA0NEw4IDZDOCA0Ljg5NTQzIDguODk1NDMgNCAxMCA0SDM4QzM5LjEwNDYgNCA0MCA0Ljg5NTQzIDQwIDZWNDRMMjQgMzUuNzI3M0w4IDQ0WiIgZmlsbD0iI2VmNDQ0NCIgc3Ryb2tlPSIjZWY0NDQ0IiBzdHJva2Utd2lkdGg9IjMiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48cGF0aCBkPSJNMTYgMThIMzIiIHN0cm9rZT0iI0ZGRiIgc3Ryb2tlLXdpZHRoPSIzIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48L3N2Zz4=" 
+                    class="tag-icon" 
+                    mode="aspectFit"
+                  ></image>
+                  <text>{{ tag.title }}</text>
+                </view>
+                
+                <view v-for="tag in item.tags" :key="tag" class="tag-badge blue">
+                  <image 
+                    src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMyIgaGVpZ2h0PSIyMyIgdmlld0JveD0iMCAwIDQ4IDQ4IiBmaWxsPSJub25lIj48cGF0aCBkPSJNOCA0NEw4IDZDOCA0Ljg5NTQzIDguODk1NDMgNCAxMCA0SDM4QzM5LjEwNDYgNCA0MCA0Ljg5NTQzIDQwIDZWNDRMMjQgMzUuNzI3M0w4IDQ0WiIgZmlsbD0iIzNiODJmNiIgc3Ryb2tlPSIjM2I4MmY2IiBzdHJva2Utd2lkdGg9IjMiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48cGF0aCBkPSJNMTYgMThIMzIiIHN0cm9rZT0iI0ZGRiIgc3Ryb2tlLXdpZHRoPSIzIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48L3N2Zz4=" 
+                    class="tag-icon" 
+                    mode="aspectFit"
+                  ></image>
+                  <text>{{ tag }}</text>
+                </view>
               </view>
               <view class="toggle-ans-btn" @click.stop="item.showAnswer = !item.showAnswer">{{ item.showAnswer ? '🙈 隐藏答案' : '👁️ 显示答案' }}</view>
             </view>
@@ -882,7 +897,12 @@ defineExpose({ open });
 .toggle-ans-btn { font-size: 12px; color: #64748b; cursor: pointer; padding: 2px 6px; border-radius: 4px; background: #f1f5f9; }
 .toggle-ans-btn:hover { background: #e2e8f0; color: #333; }
 .tags-row { display: flex; gap: 8px; align-items: center; }
-.tag-badge { font-size: 11px; padding: 2px 6px; border-radius: 4px; cursor: pointer; }
+.tag-badge { font-size: 11px; padding: 2px 6px; border-radius: 4px; cursor: pointer; display: flex;align-items: center;}
+.tag-badge text {
+  line-height: 1;      /* 让行高紧贴文字高度 */
+  position: relative;  /* 开启相对定位 */
+  top: -0.1px;           /* 核心：强制往上提 1px (如果还不够可以改成 -2px) */
+}
 .tag-badge.red { background: #fef2f2; color: #ef4444; border: 1px solid #fee2e2; }
 .tag-badge.blue { background: #eff6ff; color: #3b82f6; border: 1px solid #dbeafe; }
 .img-ctrl-row {

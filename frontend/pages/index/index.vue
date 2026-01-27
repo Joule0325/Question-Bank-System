@@ -52,7 +52,10 @@
           <view class="resource-sidebar">
             <view class="res-header">
               <view class="subject-wrapper" @click.stop="subjectDropdownOpen = !subjectDropdownOpen">
-                <view class="subject-btn"><text>{{ currentSubjectName }}</text><text class="arrow">▼</text></view>
+                <view class="subject-btn">
+				  <text>{{ currentSubjectName }}</text>
+                  <image src="/static/icons/三角.svg" class="arrow-icon" mode="aspectFit"></image>
+                </view>
                 <view class="custom-subject-dropdown" v-if="subjectDropdownOpen">
                   <view class="sub-item" v-for="(sub, index) in subjects" :key="sub.id" @click.stop="selectSubject(index)" :class="{ active: currentSubjectIdx === index }">{{ sub.title }}</view>
                 </view>
@@ -216,8 +219,23 @@
 
               <view class="q-footer">
                 <view class="tags-row">
-                  <view v-for="tag in getKnowledgeTags(q.categoryIds)" :key="'k-'+(tag.id || tag.title)" class="tag-badge red" @click.stop="handleTagClick(tag.title || tag)">🏷️ {{ tag.title || tag }}</view>
-                  <view v-for="tag in (q.tags||[])" :key="'t-'+tag" class="tag-badge blue" @click.stop="handleTagClick(tag)">🏷️ {{ tag }}</view>
+                  <view v-for="tag in getKnowledgeTags(q.categoryIds)" :key="'k-'+(tag.id || tag.title)" class="tag-badge red" @click.stop="handleTagClick(tag.title || tag)">
+                    <image 
+                      src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMyIgaGVpZ2h0PSIyMyIgdmlld0JveD0iMCAwIDQ4IDQ4IiBmaWxsPSJub25lIj48cGF0aCBkPSJNOCA0NEw4IDZDOCA0Ljg5NTQzIDguODk1NDMgNCAxMCA0SDM4QzM5LjEwNDYgNCA0MCA0Ljg5NTQzIDQwIDZWNDRMMjQgMzUuNzI3M0w4IDQ0WiIgZmlsbD0iI2VmNDQ0NCIgc3Ryb2tlPSIjZWY0NDQ0IiBzdHJva2Utd2lkdGg9IjMiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48cGF0aCBkPSJNMTYgMThIMzIiIHN0cm9rZT0iI0ZGRiIgc3Ryb2tlLXdpZHRoPSIzIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48L3N2Zz4=" 
+                      class="tag-icon" 
+                      mode="aspectFit"
+                    ></image>
+                    <text>{{ tag.title || tag }}</text>
+                  </view>
+                
+                  <view v-for="tag in (q.tags||[])" :key="'t-'+tag" class="tag-badge blue" @click.stop="handleTagClick(tag)">
+                    <image 
+                      src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMyIgaGVpZ2h0PSIyMyIgdmlld0JveD0iMCAwIDQ4IDQ4IiBmaWxsPSJub25lIj48cGF0aCBkPSJNOCA0NEw4IDZDOCA0Ljg5NTQzIDguODk1NDMgNCAxMCA0SDM4QzM5LjEwNDYgNCA0MCA0Ljg5NTQzIDQwIDZWNDRMMjQgMzUuNzI3M0w4IDQ0WiIgZmlsbD0iIzNiODJmNiIgc3Ryb2tlPSIjM2I4MmY2IiBzdHJva2Utd2lkdGg9IjMiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48cGF0aCBkPSJNMTYgMThIMzIiIHN0cm9rZT0iI0ZGRiIgc3Ryb2tlLXdpZHRoPSIzIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48L3N2Zz4=" 
+                      class="tag-icon" 
+                      mode="aspectFit"
+                    ></image>
+                    <text>{{ tag }}</text>
+                  </view>
                 </view>
                 <view class="footer-right">
                     <text class="hash-code">#{{ q.code }}</text>
@@ -989,8 +1007,64 @@ page { height: 100%; overflow: hidden; font-family: "Times New Roman", "SimSun",
 .resource-sidebar-wrapper { width: 300px; padding: 12px; flex-shrink: 0; display: flex; flex-direction: column; }
 .resource-sidebar { flex: 1; background: #F0F0F0; border-radius: 4px; display: flex; flex-direction: column; overflow: hidden; gap: 10px; padding-top: 15px;}
 .res-header { padding: 0 12px; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
-.subject-wrapper { position: relative; width: 140px; }
-.subject-btn { background: #dcfce7; color: #166534; padding: 5px 12px; border-radius: 6px; font-size: 14px; font-weight: bold; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+.subject-wrapper { 
+  position: relative; 
+  width: auto;  /* 把原来的 width: 140px 改为 auto */
+  min-width: 100px; /* 可选：设置一个最小宽度 */
+}
+.subject-btn {
+  background: #D3622B; /* 或你之前的颜色 */
+  color: white;      /* 或你之前的颜色 */
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: bold;
+  cursor: pointer;
+  
+  /* --- 布局核心修改 --- */
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  
+  /* 1. 去掉固定宽度 width: 100px; */
+  
+  /* 2. 让宽度自适应内容 */
+  width: fit-content; 
+  
+  /* 3. 设置最大宽度 (超过这个宽度就开始显示省略号) */
+  max-width: 160px; /* 你可以根据需要调整这个值，比如 200px */
+}
+.subject-btn text:first-child {
+  flex: 1;                 /* 自动占据剩余空间 */
+  overflow: hidden;        /* 超出隐藏 */
+  text-overflow: ellipsis; /* 超出显示省略号 */
+  white-space: nowrap;     /* 强制不换行 */
+  min-width: 0;            /* 关键：允许 flex 子项压缩 */
+  margin-right: 4px;       /* 和右边的箭头保持一点距离 */
+}
+/* 新增样式：控制箭头图标的大小和位置 */
+.arrow-icon {
+  width: 14px;
+  height: 14px;
+  
+  /* 如果图标在文字右边，建议用 margin-left */
+  margin-left: 4px; 
+  /* margin-right: 6px; */ /* 如果图标在左边则保留这个 */
+
+  flex-shrink: 0;
+  display: block; /* 修正了之前的 display: -100px */
+
+  /* --- 1. 设置为白色 --- */
+  /* 如果是 image 标签，color 属性无效，需用滤镜将深色图片转为白色 */
+  filter: brightness(0) invert(1);
+
+  /* --- 2. 旋转180度 & 3. 往下移 --- */
+  /* translateY 的值如果是正数，通常是向下；但旋转后可能需要反向调试 */
+  /* 建议用 position 微调位置，比较直观 */
+  transform: rotate(180deg);
+  position: relative;
+  top: 0.5px; /* 往下移 2px，根据实际视觉效果调整这个数字 */
+}
 .custom-subject-dropdown { position: absolute; top: 100%; left: 0; width: 100%; background: white; border: 1px solid #e2e8f0; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); z-index: 50; margin-top: 4px; }
 .sub-item { padding: 8px 12px; font-size: 13px; cursor: pointer; }
 .sub-item:hover { background: #f8fafc; }
@@ -1209,6 +1283,26 @@ page { height: 100%; overflow: hidden; font-family: "Times New Roman", "SimSun",
 .tag-badge { font-size: 11px; padding: 2px 6px; border-radius: 4px; cursor: pointer; }
 .tag-badge.red { background: #fef2f2; color: #ef4444; border: 1px solid #fee2e2; }
 .tag-badge.blue { background: #eff6ff; color: #3b82f6; border: 1px solid #dbeafe; }
+.tag-icon {
+  width: 12px;
+  height: 12px;
+  margin-right: 4px; /* 图标和文字的间距 */
+  display: block;
+  /* 如果你的图标是黑色的，想变成红色/蓝色，可以用滤镜（可选） */
+  /* filter: opacity(0.6); */ 
+}
+
+/* 确保 tag-badge 使用 Flex 布局垂直居中 */
+.tag-badge {
+  display: flex;       /* 必须加这个 */
+  align-items: center; /* 垂直居中 */
+  /* ...原有样式... */
+}
+.tag-badge text {
+  line-height: 1;      /* 让行高紧贴文字高度 */
+  position: relative;  /* 开启相对定位 */
+  top: -0.1px;           /* 核心：强制往上提 1px (如果还不够可以改成 -2px) */
+}
 .footer-right { display: flex; align-items: center; gap: 10px; }
 .hash-code { font-family: monospace; color: #cbd5e1; font-size: 11px; }
 .basket-add-btn-rect { padding: 4px 10px; border-radius: 4px; border: 1px solid #2563eb; color: #2563eb; font-size: 11px; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; font-weight: 500; }
@@ -1258,8 +1352,6 @@ page { height: 100%; overflow: hidden; font-family: "Times New Roman", "SimSun",
   transition: all 0.2s;
 }
 .tool-btn.primary { background: #eff6ff; color: #2563eb; border: 1px solid #dbeafe; }
-.tool-btn { width: 48px; height: 48px; border-radius: 4px; background: white; border: 1px solid #e2e8f0; display: flex; flex-direction: column; align-items: center; justify-content: center; margin-bottom: 10px; cursor: pointer; }
-.tool-btn.primary { background: #eff6ff; color: #2563eb; border: none; }
 .t-icon { font-size: 20px; margin-bottom: 2px; }
 .tool-icon-img {
   width: 22px;    /* 图标大小 */
