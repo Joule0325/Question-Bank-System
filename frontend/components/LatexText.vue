@@ -70,15 +70,11 @@ const processText = (raw) => {
     if (!src) return '';
 
     const widthVal = width ? `${width}%` : 'auto'; 
-    // 重点：vertical-align: middle 让图片与同行文字垂直居中
-    // margin-bottom: 2px 微调基线，防止图片显得偏高
     let baseStyle = `max-width:100%; height:auto; vertical-align: middle; margin: 0 4px; border-radius: 4px;`;
     
     if (width) {
         baseStyle += `width:${widthVal};`;
     }
-
-    // --- 对齐逻辑 ---
 
     if (align === 'm') {
         const imgTag = `<img src="${src}" style="${baseStyle}" class="inline-q-img" />`;
@@ -87,7 +83,7 @@ const processText = (raw) => {
     
     else if (align === 'r') {
         const floatStyle = baseStyle + `float: right; margin-left: 10px; margin-bottom: 4px;`;
-        return `<img src="${src}" style="${floatStyle}" class="inline-q-img" />`;
+        return `<img src="${src}" style="${floatStyle}" class="img-right" />`;
     }
 
     else {
@@ -111,7 +107,6 @@ const htmlContent = computed(() => {
   word-break: break-all;
   color: #333;
   
-  /* 确保容器内的文字垂直居中基准 */
   vertical-align: middle;
 
   &::after {

@@ -1,36 +1,50 @@
 <template>
   <view class="layout-shell" @click="handleGlobalClick">
-    <view class="app-sidebar">
-      <view class="logo-area">题库</view>
+    <view class="app-sidebar" :class="{ collapsed: isSidebarCollapsed }">
+      <view class="logo-area">
+        <text class="logo-txt" :class="{ 'mini': isSidebarCollapsed }">{{ isSidebarCollapsed ? 'S' : 'Source' }}</text>
+      </view>
+      
       <view class="nav-items">
         <view class="nav-item" :class="{active: activeTab==='question_bank'}" @click="activeTab='question_bank'">
-          <text class="nav-icon">📚</text><text class="nav-txt">题库</text>
+          <image src="/static/icons/题库.svg" class="nav-icon-img" mode="aspectFit"></image>
+          <text class="nav-txt">题库</text>
         </view>
         <view class="nav-item" :class="{active: activeTab==='class'}" @click="activeTab='class'">
-          <text class="nav-icon">👨‍🏫</text><text class="nav-txt">上课</text>
+          <image src="/static/icons/白板.svg" class="nav-icon-img" mode="aspectFit"></image>
+          <text class="nav-txt">白板</text>
         </view>
-        <view class="nav-item" :class="{active: activeTab==='resources'}" @click="activeTab='resources'"><text class="nav-icon">📂</text><text class="nav-txt">资源</text></view>
-        <view class="nav-item"><text class="nav-icon">📖</text><text class="nav-txt">讲义</text></view>
-        <view class="nav-item"><text class="nav-icon">👥</text><text class="nav-txt">学员</text></view>
-        <view class="nav-item"><text class="nav-icon">📅</text><text class="nav-txt">排课</text></view>
+        <view class="nav-item" :class="{active: activeTab==='resources'}" @click="activeTab='resources'">
+          <image src="/static/icons/资源.svg" class="nav-icon-img" mode="aspectFit"></image>
+          <text class="nav-txt">资源</text>
+        </view>
+      </view>
+
+      <view class="collapse-btn" @click="isSidebarCollapsed = !isSidebarCollapsed">
+        <text class="collapse-icon">{{ isSidebarCollapsed ? '»' : '«' }}</text>
       </view>
     </view>
 
     <view class="main-workspace" v-if="activeTab === 'question_bank'">
       <view class="top-header">
-        <view></view>
-        <view class="header-right">
-          <text class="status-txt">共 {{ questions.length }} 条</text>
-          <picker :range="[10, 20, 50]" @change="handlePageSizeChange">
-            <text class="page-select">{{ itemsPerPage }}条/页 ▼</text>
-          </picker>
-          <view class="pagination">
-            <button class="pg-btn" :disabled="currentPage===1" @click="changePage(-1)">&lt;</button>
-            <text class="pg-num">{{ currentPage }} / {{ totalPages || 1 }}</text>
-            <button class="pg-btn" :disabled="currentPage>=totalPages" @click="changePage(1)">&gt;</button>
-          </view>
-        </view>
-      </view>
+              <view class="header-left-filters">
+                <input class="mini-input" v-model="filterYear" placeholder="年份" @input="debounceLoadQuestions" />
+                <input class="mini-input small" v-model="filterQNumber" placeholder="题号" @input="debounceLoadQuestions" />
+                <input class="mini-input medium" v-model="filterSource" placeholder="来源关键词..." @input="debounceLoadQuestions" />
+              </view>
+      
+              <view class="header-right">
+                <text class="status-txt">共 {{ questions.length }} 条</text>
+                <picker :range="[10, 20, 50]" @change="handlePageSizeChange">
+                  <text class="page-select">{{ itemsPerPage }}条/页 ▼</text>
+                </picker>
+                <view class="pagination">
+                  <button class="pg-btn" :disabled="currentPage===1" @click="changePage(-1)">&lt;</button>
+                  <text class="pg-num">{{ currentPage }} / {{ totalPages || 1 }}</text>
+                  <button class="pg-btn" :disabled="currentPage>=totalPages" @click="changePage(1)">&gt;</button>
+                </view>
+              </view>
+            </view>
 
       <view class="workspace-body">
         
@@ -89,11 +103,20 @@
           <view class="filter-bar">
             
             <view class="filter-header" @click="isFilterExpanded = !isFilterExpanded">
-              <text class="fh-title">筛选条件</text>
+              <view class="fh-left-group">
+                <text class="fh-title">筛选条件</text>
+                
+                <view class="clear-filter-btn" 
+                      v-if="allActiveFilters.length > 0" 
+                      @click.stop="clearAllFilters">
+                  清空标签筛选
+                </view>
+              </view>
+            
               <text class="fh-icon">{{ isFilterExpanded ? '▲ 收起' : '▼ 展开' }}</text>
             </view>
           
-            <view v-show="isFilterExpanded" class="filter-body">
+            <view class="filter-body" :class="{ collapsed: !isFilterExpanded }">
               <view class="f-row">
                 <text class="f-label">题型:</text>
                 <view class="f-tags">
@@ -118,29 +141,16 @@
                 </view>
               </view>
           
-              <view class="f-row mt-2 extra-filters">
-                  <view class="mini-filter-item">
-                      <text class="mf-label">年份:</text>
-                      <input class="mf-input" v-model="filterYear" placeholder="如 2023" @input="debounceLoadQuestions" />
-                  </view>
-                  <view class="mini-filter-item">
-                      <text class="mf-label">题号:</text>
-                      <input class="mf-input small" v-model="filterQNumber" placeholder="数字" @input="debounceLoadQuestions" />
-                  </view>
-                  <view class="mini-filter-item flex-grow">
-                      <text class="mf-label">来源:</text>
-                      <input class="mf-input grow" v-model="filterSource" placeholder="输入关键词搜索..." @input="debounceLoadQuestions" />
-                  </view>
-              </view>
-          
-              <view class="f-row mt-2" v-if="allActiveFilters.length > 0">
+              <view class="f-row mt-2 active-filters-row" v-if="allActiveFilters.length > 0">
                 <text class="f-label">筛选:</text>
                 <view class="f-tags">
-                  <view v-for="item in allActiveFilters" :key="item.id" class="tag-chip blue">
-                    {{ item.name }} <text class="x-btn" @click.stop="removeFilter(item)">✕</text>
+                  <view v-for="item in allActiveFilters" :key="item.id" 
+                        class="tag-chip" 
+                        :class="item.type === 'cat' ? 'red' : 'blue'">
+                      <text>{{ item.name }}</text>
+                      <text class="x-btn" @click.stop="removeFilter(item)">✕</text>
                   </view>
-                  <text class="clear-link" @click="clearAllFilters">清空</text>
-                </view>
+                  </view>
               </view>
           
             </view> 
@@ -223,8 +233,10 @@
 
         <view class="right-toolbar">
           <text class="tool-head">工具</text>
-          <view class="tool-btn primary" @click="openAddModal"><text class="t-icon">➕</text><text class="t-lbl">录题</text></view>
-          <view class="tool-btn"><text class="t-icon">📄</text><text class="t-lbl">批量</text></view>
+          <view class="tool-btn primary" @click="openAddModal">
+              <image src="/static/icons/添加.svg" class="tool-icon-img" mode="aspectFit"></image>
+              <text class="t-lbl">录题</text>
+            </view>
           <view class="divider"></view>
           <text class="tool-head">试题篮</text>
           <view class="basket-col">
@@ -289,11 +301,13 @@ import AddQuestionModal from '@/components/AddQuestionModal.vue';
 import ExportQuestionsModal from '@/components/ExportQuestionsModal.vue';
 import ManageSubjectModal from '@/components/ManageSubjectModal.vue';
 import ManageContentModal from '@/components/ManageContentModal.vue';
-// [新增引用]
 import QuestionBasketModal from '@/components/QuestionBasketModal.vue';
 
+// --- 新增：折叠状态控制 ---
+const isSidebarCollapsed = ref(false); 
+
 const ALL_PROVINCES = [
-    "北京", "天津", "上海", "重庆", "河北", "山西", "内蒙古", 
+    "全国", "北京", "天津", "上海", "重庆", "河北", "山西", "内蒙古", 
     "辽宁", "吉林", "黑龙江", "江苏", "浙江", "安徽", "福建", 
     "江西", "山东", "河南", "湖北", "湖南", "广东", "广西", 
     "海南", "四川", "贵州", "云南", "西藏", "陕西", "甘肃", 
@@ -669,21 +683,305 @@ const handleGlobalClick = (e) => {
 
 <style lang="scss">
 page { height: 100%; overflow: hidden; font-family: "Times New Roman", "SimSun", "Songti SC", serif;}
-.layout-shell { display: flex; width: 100%; height: 100vh; background-color: #f8fafc; }
-.app-sidebar { width: 80px; background: #0f172a; display: flex; flex-direction: column; align-items: center; padding: 20px 0; color: #94a3b8; flex-shrink: 0; }
-.logo-area { color: white; font-weight: bold; font-size: 18px; margin-bottom: 30px; }
+.layout-shell { display: flex; width: 100%; height: 100vh; background-color: #ffffff; }
+
+/* 选中标签行：强制垂直居中 + 强制加大顶部间距 */
+.active-filters-row {
+    display: flex; /* 确保是 flex 布局 */
+    align-items: flex-start !important;
+    
+    /* 核心修改：加大间距，并使用 !important 防止被覆盖 */
+    margin-top: 13px !important;    
+    
+    /* 确保宽度占满，防止布局塌陷 */
+    width: 100%;
+}
+
+/* 【新增】专门控制选中标签的容器：开启换行 + 增加行距 */
+.active-filters-row .f-tags {
+    display: flex;
+    flex-wrap: wrap;        /* 必须：允许换行 */
+    gap: 10px;              /* 核心：设置 水平间距 和 垂直间距 都是 10px */
+    width: 100%;            /* 占满宽度 */
+}
+
+/* 再次确认微调左侧“筛选:”标题的位置 */
+.active-filters-row .f-label {
+    margin-top: 1px !important; /* 往下推一点，对齐第一行标签的文字 */
+    align-self: flex-start;     /* 确保自身顶端对齐 */
+}
+
+/* 蓝色气泡样式微调 (如果觉得气泡太大，可以稍微改小一点) */
+/* 1. 标签气泡基础样式 */
+.tag-chip {
+    display: flex;          /* 【关键】开启Flex布局 */
+    align-items: center;    /* 【关键】垂直居中，让文字和叉号对齐 */
+    padding: 2px 8px;       /* 内边距 */
+    border-radius: 4px;     /* 【要求】圆角 4px */
+    font-size: 12px;
+    margin-right: 8px;      /* 标签之间的间距 */
+    border: 1px solid transparent; /* 预留边框位置 */
+    height: 16px;           /* 固定高度，看起来更整齐 */
+}
+
+/* 2. 红色样式（知识点标签） */
+.tag-chip.red {
+    background: #fef2f2;    /* 淡红背景 */
+    color: #ef4444;         /* 红色文字 */
+    border-color: #fee2e2;  /* 红色边框 */
+	border-radius: 4px;     /* 【要求】圆角 4px */
+}
+
+/* 3. 蓝色样式（用户标签/其他） */
+.tag-chip.blue {
+    background: #eff6ff;    /* 淡蓝背景 */
+    color: #2563eb;         /* 蓝色文字 */
+    border-color: #dbeafe;  /* 蓝色边框 */
+	border-radius: 4px;     /* 【要求】圆角 4px */
+}
+
+/* 4. 叉号按钮样式 */
+.x-btn {
+    margin-left: 3px;       /* 叉号和文字拉开一点距离 */
+    cursor: pointer;
+    font-size: 10px;        /* 叉号稍微小一点 */
+    font-weight: bold;
+    display: flex;          /* 确保叉号自身也是居中的 */
+    align-items: center;
+    justify-content: center;
+    padding-top: 2px;       /* 微调：有时候符号视觉上会偏上，往下压1px */
+}
+
+/* --- 侧边栏与动画核心 --- */
+.app-sidebar { 
+  width: 120px;       /* 展开时宽度 */
+  background: #ffffff; 
+  border-right: 1px solid #e2e8f0;
+  display: flex; 
+  flex-direction: column; 
+  align-items: center; 
+  padding: 20px 0; 
+  color: #334155; 
+  flex-shrink: 0; 
+  position: relative;
+  /* 关键：更平滑的宽度过渡曲线，模仿物理缓动 */
+  transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden; /* 防止折叠时内容溢出 */
+}
+
+.app-sidebar.collapsed {
+  width: 60px; /* 折叠时宽度 */
+}
+
+/* --- 折叠按钮 --- */
+.collapse-btn {
+  margin-top: auto; 
+  width: 100%;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-top: 1px solid #f1f5f9;
+  transition: background 0.2s;
+}
+.collapse-btn:hover {
+  background: #f8fafc;
+}
+.collapse-icon {
+  font-size: 18px;
+  color: #94a3b8;
+  transition: transform 0.3s;
+}
+.collapse-btn:hover .collapse-icon {
+  color: #2563eb;
+}
+
+/* --- Logo 区域 --- */
+.logo-area { 
+  color: #334155; 
+  font-weight: bold; 
+  font-size: 18px; 
+  margin-bottom: 30px; 
+  white-space: nowrap;
+  /* 保持高度稳定 */
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.logo-txt {
+    transition: opacity 0.3s;
+}
+
+/* --- 导航项布局 --- */
 .nav-items { display: flex; flex-direction: column; gap: 5px; width: 100%; }
-.nav-item { height: 70px; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; }
-.nav-item.active { background: #2563eb; color: white; }
-.nav-icon { font-size: 24px; margin-bottom: 4px; }
-.nav-txt { font-size: 12px; }
+
+.nav-item { 
+  position: relative;
+  height: 55px; 
+  display: flex; 
+  flex-direction: row; 
+  align-items: center; 
+  justify-content: center; 
+  cursor: pointer; 
+  color: #64748b; 
+  width: 98%; 
+  transition: all 0.3s;
+  border-radius: 10px; /* 设置圆角大小，10px 比较适中 */
+}
+
+/* 选中状态主体 */
+.nav-item.active {
+  background: transparent;
+  color: #f97316; 
+}
+
+/* --- 左侧高斯光效 & 右侧竖条 --- */
+.nav-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 10px;  
+  height: 90%;  
+  background: radial-gradient(ellipse at left center, rgba(249, 115, 22, 0.6) 20%, rgba(249, 115, 22, 0) 70%);
+  pointer-events: none;
+  z-index: 0;
+  /* 添加透明度过渡，而不是直接消失 */
+  transition: opacity 0.2s; 
+  opacity: 1;
+}
+
+/* --- 关键：折叠时隐藏光效和竖条 --- */
+.app-sidebar.collapsed .nav-item.active::before,
+.app-sidebar.collapsed .nav-item.active::after {
+  opacity: 0; /* 变透明，而不是 display: none，保持渲染层稳定 */
+}
+
+/* --- 图标与文字 --- */
+.nav-icon-img {
+  width: 20px; 
+  height: 20px;
+  margin-bottom: 0; 
+  margin-right: 8px; /* 默认右边距 */
+  display: block;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); /* 图标移动也加缓动 */
+}
+
+/* 选中时图标放大发光（任何状态都保持） */
+.nav-item.active .nav-icon-img {
+  filter: drop-shadow(0 0 3px #f97316); 
+  transform: scale(1.2);
+  position: relative; 
+  z-index: 1;
+}
+
+.nav-txt { 
+  font-size: 14px; 
+  color: #334155; 
+  white-space: nowrap;
+  opacity: 1;
+  /* 关键优化：使用 max-width 实现文字滑入滑出，代替 display: none */
+  max-width: 80px; 
+  /* 文字淡入淡出和宽度变化 */
+  transition: opacity 0.2s ease-in-out, max-width 0.35s cubic-bezier(0.4, 0, 0.2, 1), margin-right 0.3s;
+  transform-origin: left center;
+}
+
+/* 选中时文字放大 */
+.nav-item.active .nav-txt {
+  font-weight: bold;
+  transform: scale(1.1); /* 这里仅放大，不影响布局流 */
+  color: #f97316;
+}
+
+/* --- 折叠时的特殊样式 (修改这里) --- */
+
+/* 1. [新增] 强制折叠后的按钮变成正方形并自动居中 */
+.app-sidebar.collapsed .nav-item {
+  width: 40px;       /* 固定宽度，不要用百分比 */
+  height: 40px;      /* 固定高度 */
+  margin: 4px auto;  /* 关键：上下4px，左右 auto 实现绝对居中 */
+  padding: 0;        /* 清除内边距干扰 */
+  justify-content: center; /* 内部元素居中 */
+}
+
+/* 2. [修改] 强制去除图标右边距，防止偏移 */
+.app-sidebar.collapsed .nav-icon-img {
+  margin-right: 0 !important; /* 加 !important 确保生效 */
+  margin-left: 0;
+}
+
+/* 3. [保持] 文字隐藏 */
+.app-sidebar.collapsed .nav-txt {
+  opacity: 0;
+  max-width: 0; 
+  margin-right: 0;
+  overflow: hidden;
+}
+
+/* --- 其他通用样式保持不变 --- */
 .main-workspace { flex: 1; display: flex; flex-direction: column; min-width: 0; height: 100%; overflow: hidden; }
 .empty-state { display: flex; align-items: center; justify-content: center; height: 100%; color: #94a3b8; }
 .empty-content { text-align: center; }
 .empty-icon { font-size: 40px; margin-bottom: 10px; display: block; }
 .empty-text { font-size: 18px; font-weight: bold; color: #64748b; margin-bottom: 5px; display: block; }
-.top-header { height: 56px; background: white; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; padding: 0 20px; flex-shrink: 0; }
-.header-right { display: flex; align-items: center; gap: 15px; font-size: 13px; color: #64748b; }
+/* 1. 修改顶栏容器：变为圆角矩形，与周围有间距 */
+.top-header { 
+    height: 50px; /* 稍微增高一点，容纳输入框 */
+    background: #f0f0f0; 
+    /* 核心修改：圆角和边距 */
+    margin: 12px 12px 0 12px; 
+    border-radius: 4px; 
+    box-shadow: 0 2px 6px rgba(0,0,0,0.02); /* 加一点淡淡的阴影更有质感 */
+    
+    display: flex; 
+    justify-content: space-between; 
+    align-items: center; 
+    padding: 0 20px; 
+    flex-shrink: 0; 
+    /* 去掉原来的底边框，因为现在是悬浮卡片风格了 */
+    border-bottom: none; 
+}
+
+/* 2. 新增：左侧筛选区样式 */
+.header-left-filters {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+/* 3. 新增：顶栏微型输入框样式 */
+.mini-input {
+    background: #ffffff;
+    border: 1px solid transparent;
+    height: 27px;
+    line-height: 32px;
+    border-radius: 6px;
+    padding: 0 10px;
+    font-size: 13px;
+    color: #334155;
+    width: 80px;
+    transition: all 0.2s;
+}
+.mini-input:focus {
+    background: white;
+    border-color: #2563eb;
+    box-shadow: 0 0 0 2px rgba(37,99,235,0.1);
+}
+.mini-input.small { width: 60px; } /* 题号短一点 */
+.mini-input.medium { width: 140px; } /* 来源长一点 */
+
+/* [原有样式微调] 保持右侧样式不变，或者稍微优化 */
+.header-right { 
+    display: flex; 
+    align-items: center; 
+    gap: 15px; 
+    font-size: 13px; 
+    color: #64748b; 
+}
 .page-select { cursor: pointer; }
 .pagination { display: flex; gap: 8px; align-items: center; }
 .pg-btn { padding: 0 10px; height: 26px; line-height: 24px; font-size: 12px; }
@@ -723,20 +1021,120 @@ page { height: 100%; overflow: hidden; font-family: "Times New Roman", "SimSun",
 .tree-scroll::-webkit-scrollbar-thumb:hover { background-color: #94a3b8; }
 .tree-scroll::-webkit-scrollbar-track { background: transparent; }
 .content-canvas { flex: 1; background: #f8fafc; display: flex; flex-direction: column; min-width: 0; height: 100%; overflow: hidden; }
-.filter-bar { background: white; padding: 12px 20px; border-bottom: 1px solid #e2e8f0; flex-shrink: 0; }
-.filter-header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 8px; cursor: pointer; border-bottom: 1px dashed #f1f5f9; margin-bottom: 8px; user-select: none; }
-.fh-title { font-size: 13px; font-weight: bold; color: #334155; }
+/* 修改筛选容器：变为圆角矩形卡片 */
+/* 1. 筛选容器通用样式 */
+.filter-bar { 
+    background: white; 
+    padding: 10px 20px; 
+    margin: 12px; 
+    border-radius: 4px; 
+    box-shadow: 0 2px 6px rgba(0,0,0,0.02);
+    flex-shrink: 0; 
+    
+    /* 【修改点1】这里控制整个区域的字体大小 */
+    font-size: 14px; /* 原来可能是13px，改大一点 */
+}
+
+/* 1. 调整左侧组合容器：让标题和按钮横向排列 */
+.fh-left-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;  /* 标题和按钮之间的距离 */
+}
+
+/* 2. 定义清空按钮样式：红色圆角矩形 */
+.clear-filter-btn {
+    /* 红色圆角风格 */
+    background-color: #fef2f2;
+    color: #ef4444;
+    border: 1px solid #fee2e2;
+    border-radius: 4px;
+    
+    /* 尺寸调整 */
+    font-size: 12px;
+    padding: 2px 10px;
+    height: 24px;        /* 固定高度 */
+    display: flex;       /* 确保文字居中 */
+    align-items: center;
+    
+    cursor: pointer;
+    font-weight: normal; /* 防止继承标题的粗体 */
+}
+
+.clear-filter-btn:hover {
+    background-color: #fee2e2;
+}
+
+/* 2. 筛选区标题（上部分） */
+.filter-header { 
+    display: flex; 
+    justify-content: space-between; 
+    align-items: center; 
+    cursor: pointer; 
+    user-select: none;
+    
+    /* 【修改点2】去掉了原来的 border-bottom (分割线) */
+    /* border-bottom: 1px dashed #f1f5f9; */ 
+    
+    /* 【修改点3】这里控制上下两部分的间距 */
+    margin-bottom: 0px; /* 原来是8px，觉得挤可以改大，觉得空可以改小 */
+}
+
+.fh-title { 
+    font-weight: bold; 
+    color: #334155;
+    /* 如果想单独改标题字体大小，在这里改 */
+    font-size: 14px; 
+}
+
+/* 3. 筛选区内容（下部分）及滑动动画核心 */
+.filter-body { 
+    display: flex; 
+    flex-direction: column; 
+    
+    /* 【修改点4】实现滑动动画的关键属性 */
+    overflow: hidden;         /* 必须：隐藏超出部分 */
+    max-height: 1000px;       /* 设定一个足够大的最大高度，保证内容能完全显示 */
+    opacity: 1;               /* 透明度全显 */
+    transition: all 0.1s ease-in-out; /* 动画过渡时间，0.4s 比较顺滑 */
+	margin-top: 20px;
+}
+
+/* 当添加了 collapsed 类时的状态（折叠状态） */
+.filter-body.collapsed {
+    max-height: 0;            /* 高度变为0 */
+    opacity: 0;               /* 透明度变0 */
+    margin: 0;                /* 去掉间距 */
+    padding: 0;               /* 去掉内边距 */
+}
 .fh-icon { font-size: 12px; color: #94a3b8; }
 .filter-header:hover .fh-icon { color: #2563eb; }
-.filter-body { display: flex; flex-direction: column; }
-.f-row { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.f-row { display: flex; align-items: center; gap: 2px; font-size: 13px; }
 .f-row.mt-2 { margin-top: 8px; }
 .f-row.align-start { align-items: flex-start; }
-.f-label { font-weight: bold; color: #64748b; width: 40px; flex-shrink: 0; margin-top: 4px; }
-.f-tags { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; }
-.tag { padding: 4px 12px; border-radius: 15px; border: 1px solid #e2e8f0; cursor: pointer; color: #64748b; }
-.tag.active { background: #eff6ff; color: #2563eb; border-color: #bfdbfe; }
-.province-grid { display: grid; grid-template-columns: repeat(9, 1fr); gap: 8px; flex: 1; }
+.f-label { font-weight: bold; color: #64748b; width: 40px; flex-shrink: 0; margin-top: 4px; font-size: 14px;}
+.f-tags { display: flex; flex-wrap: wrap; gap: 0px; flex: 1; }
+/* 修改 .tag：去掉边框和圆角，变为纯文字 */
+.tag { 
+    padding: 4px 12px; 
+    /* 去掉原来的 border 和 border-radius */
+    border: none; 
+    background: transparent; /* 确保无背景 */
+    
+    cursor: pointer; 
+    color: #64748b; /* 未选中时的灰色 */
+    position: relative; /* 为以后可能加下划线或其他效果留口子 */
+	font-size: 14px;
+}
+
+/* 修改选中状态：蓝色、加粗、无背景 */
+.tag.active { 
+    background: transparent; /* 去掉原来的浅蓝背景 */
+    color: #2563eb;          /* 蓝色 */
+    font-weight: bold;       /* 加粗 */
+    border: none;
+}
+.province-grid { display: grid; grid-template-columns: repeat(11, 1fr); gap: 0px 0px; flex: 1; }
 .province-grid .tag { text-align: center; display: flex; justify-content: center; align-items: center; }
 .extra-filters { display: flex; align-items: center; gap: 12px; width: 100%; }
 .mini-filter-item { display: flex; align-items: center; gap: 6px; }
@@ -747,10 +1145,35 @@ page { height: 100%; overflow: hidden; font-family: "Times New Roman", "SimSun",
 .mf-input.small { width: 50px; }
 .mf-input.grow { width: 100%; }
 .tag-chip { font-size: 12px; padding: 2px 8px; border-radius: 12px; display: flex; align-items: center; gap: 4px; }
-.tag-chip.blue { background: #dbeafe; color: #1e40af; }
-.x-btn { cursor: pointer; font-weight: bold; }
-.clear-link { font-size: 12px; color: #94a3b8; text-decoration: underline; cursor: pointer; margin-left: auto; }
-.list-scroll { flex: 1; padding: 20px; box-sizing: border-box; overflow-y: hidden; height: 0; }
+/* 修改清空按钮：适配顶栏样式 */
+.clear-link {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    
+    /* 红色圆角矩形风格保持不变 */
+    background-color: #fef2f2;
+    color: #ef4444;
+    border: 1px solid #fee2e2;
+    border-radius: 6px;  /* 改为6px，和旁边的输入框保持一致 */
+    
+    padding: 0 12px;
+    height: 32px;        /* 【关键】高度改为 32px，和旁边的输入框一样高 */
+    font-size: 13px;     /* 字体稍微改大一点点适配 */
+    cursor: pointer;
+    white-space: nowrap; /* 防止文字换行 */
+    
+    /* 【关键修改】去掉 margin-left: auto，因为现在是紧跟在输入框后面 */
+    margin-left: 0;      
+    transition: all 0.2s;
+}
+
+.clear-link:hover {
+    background-color: #fee2e2;
+    border-color: #fca5a5;
+}
+
+.list-scroll { flex: 1; padding: 12px; box-sizing: border-box; overflow-y: hidden; height: 100%; }
 .state-txt { text-align: center; margin-top: 50px; color: #94a3b8; }
 .q-card { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
 .q-header { display: flex; justify-content: space-between; font-size: 12px; color: #64748b; margin-bottom: 10px; }
@@ -798,15 +1221,69 @@ page { height: 100%; overflow: hidden; font-family: "Times New Roman", "SimSun",
 .layout-side-right { display: flex; gap: 15px; align-items: flex-start; }
 .layout-side-right .content-wrapper { flex: 1; }
 .layout-side-right .side-img-container { width: 30%; max-width: 200px; flex-shrink: 0; }
-.right-toolbar { width: 80px; background: #f8fafc; border-left: 1px solid #e2e8f0; display: flex; flex-direction: column; align-items: center; padding: 20px 0; flex-shrink: 0; }
-.tool-head { font-size: 12px; font-weight: bold; color: #94a3b8; margin-bottom: 10px; }
-.tool-btn { width: 48px; height: 48px; border-radius: 12px; background: white; border: 1px solid #e2e8f0; display: flex; flex-direction: column; align-items: center; justify-content: center; margin-bottom: 10px; cursor: pointer; }
+.right-toolbar { 
+  width: 70px; 
+  background: #f0f0f0;          /* [建议] 改为白色，配合阴影才有悬浮卡片感 */
+  
+  /* 圆角与间距 */
+  border-radius: 4px;          
+  margin: 12px 12px 12px 12px;     
+  box-shadow: 0 2px 6px rgba(0,0,0,0.03); 
+
+  display: flex; 
+  flex-direction: column; 
+  align-items: center; 
+  padding: 20px 0; 
+  flex-shrink: 0; 
+}
+.tool-head {
+  font-size: 14px;  /* 设置为你想要的大小，例如 12px 或 13px */
+  font-weight: bold;
+  margin-bottom: 10px;
+}
+
+.tool-btn { 
+  width: 48px; 
+  height: 48px; 
+  border-radius: 12px; 
+  background: white; 
+  border: 1px solid #e2e8f0; 
+  display: flex; 
+  flex-direction: column; 
+  align-items: center; 
+  justify-content: center;
+  margin-bottom: 12px; 
+  cursor: pointer; 
+  box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+  transition: all 0.2s;
+}
+.tool-btn.primary { background: #eff6ff; color: #2563eb; border: 1px solid #dbeafe; }
+.tool-btn { width: 48px; height: 48px; border-radius: 4px; background: white; border: 1px solid #e2e8f0; display: flex; flex-direction: column; align-items: center; justify-content: center; margin-bottom: 10px; cursor: pointer; }
 .tool-btn.primary { background: #eff6ff; color: #2563eb; border: none; }
-.t-icon { font-size: 18px; margin-bottom: 2px; }
-.t-lbl { font-size: 10px; }
+.t-icon { font-size: 20px; margin-bottom: 2px; }
+.tool-icon-img {
+  width: 22px;    /* 图标大小 */
+  height: 22px;
+  margin-bottom: 1px; /* 图标和文字之间的微小间距 */
+  display: block;
+  
+  /* 关键：清除所有边距，确保绝对居中 */
+  margin-left: 0;
+  margin-right: 0;
+}
+/* 按钮文字样式 */
+.t-lbl { 
+  font-size: 10px;       /* [修改] 字体改小一点 (推荐 10px 或 11px) */
+  
+  margin-top: 4px;       /* [关键] 增加上边距，让文字往下移，远离图标 */
+  
+  line-height: 1;        /* 保持行高紧凑 */
+  font-weight: 500;      /* 字重 */
+  color: #2563eb;        /* (可选) 确保文字颜色清晰 */
+}
 .divider { width: 40px; height: 1px; background: #e2e8f0; margin: 10px 0 20px; }
 .basket-col { display: flex; flex-direction: column; gap: 8px; }
-.basket-circle { width: 48px; height: 40px; border-radius: 8px; background: white; border: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: center; position: relative; cursor: pointer; color: #64748b; font-weight: bold; }
+.basket-circle { width: 35px; height: 35px; border-radius: 4px; background: white; display: flex; align-items: center; justify-content: center; position: relative; cursor: pointer; color: #64748b; font-weight: bold; margin-top: 10px;}
 .basket-circle:hover { border-color: #2563eb; color: #2563eb; background: #eff6ff; }
 .badge { position: absolute; top: -2px; right: -2px; background: #ef4444; color: white; font-size: 9px; width: 16px; height: 16px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
 .basket-scroll { max-height: 60vh; }
