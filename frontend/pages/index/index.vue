@@ -958,7 +958,7 @@ page { height: 100%; overflow: hidden; font-family: "Times New Roman", "SimSun",
     display: flex; 
     justify-content: space-between; 
     align-items: center; 
-    padding: 0 20px; 
+    padding: 0 12px; 
     flex-shrink: 0; 
     /* 去掉原来的底边框，因为现在是悬浮卡片风格了 */
     border-bottom: none; 
@@ -1005,34 +1005,52 @@ page { height: 100%; overflow: hidden; font-family: "Times New Roman", "SimSun",
 .pg-btn { padding: 0 10px; height: 26px; line-height: 24px; font-size: 12px; }
 .workspace-body { flex: 1; display: flex; overflow: hidden; height: 100%; }
 .resource-sidebar-wrapper { width: 300px; padding: 12px; flex-shrink: 0; display: flex; flex-direction: column; }
-.resource-sidebar { flex: 1; background: #F0F0F0; border-radius: 4px; display: flex; flex-direction: column; overflow: hidden; gap: 10px; padding-top: 15px;}
-.res-header { padding: 0 12px; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
+.resource-sidebar { flex: 1; background: #F0F0F0; border-radius: 4px; display: flex; flex-direction: column; overflow: hidden; gap: 15px; padding-top: 15px;}
+.res-header { padding: 0px 12px; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; border-radius: 4px;}
 .subject-wrapper { 
   position: relative; 
   width: auto;  /* 把原来的 width: 140px 改为 auto */
-  min-width: 100px; /* 可选：设置一个最小宽度 */
 }
 .subject-btn {
-  background: #D3622B; /* 或你之前的颜色 */
-  color: white;      /* 或你之前的颜色 */
-  padding: 5px 12px;
-  border-radius: 6px;
-  font-size: 14px;
-  font-weight: bold;
-  cursor: pointer;
+  background:#F87F23; /* 保持你的颜色，或者尝试 iOS 风格橙色 #FF9500 */
+  color: white;
   
-  /* --- 布局核心修改 --- */
+  font-size: 14px;
+  
+  /* --- 布局调整 --- */
+  height: 32px;            /* 设定固定高度 */
+  box-sizing: border-box;  /* 确保 padding 不会撑大高度 */
+  padding: 0px 14px;  /* 稍微加大一点内边距，手指更好点 */
+  width: fit-content; 
+  max-width: 160px;
   display: flex;
   justify-content: space-between;
   align-items: center;
+
+  /* --- iPhone 风格核心 --- */
+  /* 1. 更大的圆角，接近 iOS 的圆润感 */
+  border-radius: 4px; /* 或者 10px，不要太方 */
   
-  /* 1. 去掉固定宽度 width: 100px; */
+  /* 2. 极其平滑的过渡动画 (贝塞尔曲线) */
+  /* 这里的 cubic-bezier(0.25, 0.1, 0.25, 1) 是 iOS 默认动画曲线的一种模拟 */
+  transition: transform 0.2s cubic-bezier(0.25, 0.1, 0.25, 1), 
+              opacity 0.2s cubic-bezier(0.25, 0.1, 0.25, 1),
+              background-color 0.2s;
+
+  /* 3. 去掉默认高光，增加质感（可选） */
+  box-shadow: 0 0px 6px rgba(249, 115, 22, 0.5); /* 淡淡的同色系阴影 */
   
-  /* 2. 让宽度自适应内容 */
-  width: fit-content; 
-  
-  /* 3. 设置最大宽度 (超过这个宽度就开始显示省略号) */
-  max-width: 160px; /* 你可以根据需要调整这个值，比如 200px */
+  /* 4. 防止点击高亮背景块（小程序/H5特有） */
+  -webkit-tap-highlight-color: transparent;
+  cursor: pointer;
+  user-select: none;
+}
+
+/* --- 按下状态 (Active State) --- */
+/* 这是 iOS 交互的灵魂：按下时瞬间变暗或缩小 */
+.subject-btn:active {
+  transform: scale(0.96); /* 微微缩小，模拟按压 */
+  opacity: 0.85;          /* 微微变透明 */
 }
 .subject-btn text:first-child {
   flex: 1;                 /* 自动占据剩余空间 */
@@ -1044,8 +1062,8 @@ page { height: 100%; overflow: hidden; font-family: "Times New Roman", "SimSun",
 }
 /* 新增样式：控制箭头图标的大小和位置 */
 .arrow-icon {
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
   
   /* 如果图标在文字右边，建议用 margin-left */
   margin-left: 4px; 
@@ -1065,23 +1083,48 @@ page { height: 100%; overflow: hidden; font-family: "Times New Roman", "SimSun",
   position: relative;
   top: 0.5px; /* 往下移 2px，根据实际视觉效果调整这个数字 */
 }
-.custom-subject-dropdown { position: absolute; top: 100%; left: 0; width: 100%; background: white; border: 1px solid #e2e8f0; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); z-index: 50; margin-top: 4px; }
-.sub-item { padding: 8px 12px; font-size: 13px; cursor: pointer; }
+.custom-subject-dropdown { position: absolute; top: 100%; left: 50%;transform: translateX(-50%);width: 100%; background: white; border: 1px ; border-radius: 4px; box-shadow: 0 0px 12px rgba(0, 0, 0, 0.12); z-index: 50; margin-top: 4px; }
+.sub-item { padding: 8px 12px; font-size: 13px; cursor: pointer; text-align: center;}
 .sub-item:hover { background: #f8fafc; }
-.sub-item.active { color: #166534; font-weight: bold; background: #f0fdf4; }
+.sub-item.active { color: #F87F23; font-weight: bold; background: #f87f231A; }
 .setting-wrapper { position: relative; }
-.setting-btn.custom-menu-icon { display: flex; flex-direction: column; justify-content: center; align-items: center; width: 30px; height: 30px; cursor: pointer; border-radius: 4px; gap: 4px; }
-.setting-btn.custom-menu-icon:hover { background-color: #e2e8f0; }
+.setting-btn.custom-menu-icon {
+  /* ...原有布局属性... */
+  display: flex; 
+  flex-direction: column; 
+  justify-content: center; 
+  align-items: center; 
+  width: 32px; 
+  height: 32px; 
+  gap: 4px;
+  
+  /* --- 新增质感 --- */
+  border-radius: 4px; /* 与左侧保持一致 */
+  background-color: transparent; /* 默认透明 */
+  transition: background-color 0.2s, transform 0.2s;
+  cursor: pointer;
+}
+
+/* 鼠标悬停（电脑端） */
+.setting-btn.custom-menu-icon:hover {
+  background-color: rgba(0, 0, 0, 0.05); /* 极淡的灰色背景 */
+}
+
+/* 按下状态（手机/点击） */
+.setting-btn.custom-menu-icon:active {
+  transform: scale(0.92); /* 同样缩小 */
+  background-color: rgba(0, 0, 0, 0.1);
+}
 .menu-line { width: 16px; height: 2px; background-color: #94a3b8; border-radius: 2px; }
 .setting-wrapper:hover .menu-line { background-color: #2563eb; }
 .popover-menu { position: absolute; top: 100%; right: 0; margin-top: 2px; background: white; border: 1px solid #e2e8f0; box-shadow: 0 4px 12px rgba(0,0,0,0.1); z-index: 100; border-radius: 6px; width: 110px; text-align: center;}
 .menu-item { padding: 8px 12px; font-size: 13px; cursor: pointer; &:hover { background: #f8fafc; } }
 .menu-item.header { font-weight: bold; color: #94a3b8; font-size: 12px; border-bottom: 1px solid #eee; }
 .divider-h { height: 1px; background: #f1f5f9; margin: 4px 0; }
-.search-bar-row { display: flex; align-items: center; padding: 0 12px; gap: 8px; flex-shrink: 0; }
+.search-bar-row { display: flex; align-items: center; padding: 0 12px; gap: 0px; flex-shrink: 0; }
 .search-wrap { flex: 1; }
-.search-input { background: white; padding: 0 10px; border-radius: 4px; font-size: 13px; width: 100%; box-sizing: border-box; height: 36px; line-height: 36px; border: 1px solid #e2e8f0; }
-.multi-switch { display: flex; align-items: center; gap: 4px; cursor: pointer; padding: 4px 8px; border-radius: 4px; user-select: none; }
+.search-input { background: white; padding: 0 10px; border-radius: 4px; font-size: 13px; width: 95%; box-sizing: border-box; height: 32px; line-height: 32px; border: 1px solid #e2e8f0; }
+.multi-switch { display: flex; align-items: center; gap: 4px; cursor: pointer; padding: 4px 4px; border-radius: 4px; user-select: none; }
 .multi-switch:hover { background: #e2e8f0; }
 .multi-switch.active { background: #eff6ff; color: #2563eb; }
 .switch-txt { font-size: 12px; font-weight: bold; }
@@ -1247,9 +1290,9 @@ page { height: 100%; overflow: hidden; font-family: "Times New Roman", "SimSun",
     border-color: #fca5a5;
 }
 
-.list-scroll { flex: 1; padding: 12px; box-sizing: border-box; overflow-y: hidden; height: 100%; }
+.list-scroll { flex: 1; padding: 12px 0px 12px 12px; box-sizing: border-box; overflow-y: hidden; height: 100%; }
 .state-txt { text-align: center; margin-top: 50px; color: #94a3b8; }
-.q-card { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+.q-card { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin-bottom: 16px;margin-right: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
 .q-header { display: flex; justify-content: space-between; font-size: 12px; color: #64748b; margin-bottom: 10px; }
 .meta-left { display: flex; gap: 6px; flex-wrap: wrap; }
 .info-chip { padding: 2px 8px; border-radius: 4px; background: #f1f5f9; color: #64748b; font-size: 11px; display: flex; align-items: center; }

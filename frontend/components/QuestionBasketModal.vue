@@ -186,7 +186,7 @@ const handleClear = () => {
 }
 /* 抽屉主体 */
 .drawer-content {
-    width: 600px; height: 100%; background: white;
+    width: 800px; height: 100%; background: white;
     display: flex; flex-direction: column;
     box-shadow: -2px 0 10px rgba(0,0,0,0.1);
     animation: slideIn 0.3s ease-out;
@@ -222,7 +222,7 @@ const handleClear = () => {
     padding-left: 10px; border-left: 4px solid #2563eb; margin-bottom: 10px; 
 }
 
-.mini-card { background: white; border-radius: 6px; padding: 12px; margin-bottom: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+.mini-card { background: white; border-radius: 6px; padding: 12px; margin-bottom: 10px;margin-right: 18px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
 .mc-top { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 8px; border-bottom: 1px dashed #f1f5f9; padding-bottom: 5px; }
 .mc-idx { font-weight: bold; color: #94a3b8; }
 .mc-del { color: #ef4444; cursor: pointer; }
