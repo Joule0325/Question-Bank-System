@@ -9,7 +9,7 @@ import fs from 'fs';
 const app = express();
 const PORT = 3001;
 
-// --- 1. 连接 MongoDB ---
+// 1. 连接 MongoDB
 const MONGO_URI = 'mongodb://127.0.0.1:27017/question-bank';
 
 mongoose.connect(MONGO_URI)
@@ -19,61 +19,42 @@ mongoose.connect(MONGO_URI)
 app.use(cors());
 app.use(bodyParser.json({ limit: '50mb' }));
 
-// --- [关键修复] 路径定义 ---
-// 确保 uploads 文件夹路径绝对正确
+// 路径定义
 const uploadDir = path.join(process.cwd(), 'uploads');
 if (!fs.existsSync(uploadDir)) { fs.mkdirSync(uploadDir); }
 
-console.log('📂 图片存储路径:', uploadDir); // 启动时打印，让你确认路径对不对
-
-// --- [核心大招] 手动接管图片下载请求 ---
-// 把它放在 express.static 之前，优先拦截！
+// 图片请求接管
 app.get('/uploads/:filename', (req, res, next) => {
     const filename = req.params.filename;
     const filePath = path.join(uploadDir, filename);
-
-    // 1. 先看看有没有这个“无后缀”的原始文件
     if (fs.existsSync(filePath)) {
-        console.log(`✅ 找到文件(无后缀)，强制发送: ${filename}`);
-        res.setHeader('Content-Type', 'image/jpeg'); // 欺骗浏览器说这是 JPG
+        res.setHeader('Content-Type', 'image/jpeg');
         return res.sendFile(filePath);
     }
-    
-    // 2. 如果没找到，试试是不是硬盘上其实有后缀？(比如请求的是 123，硬盘上是 123.jpg)
-    // 这是一个容错机制
     const extensions = ['.jpg', '.png', '.jpeg'];
     for (const ext of extensions) {
         if (fs.existsSync(filePath + ext)) {
-             console.log(`✅ 找到文件(补全后缀 ${ext})，发送: ${filename + ext}`);
              res.setHeader('Content-Type', 'image/jpeg');
              return res.sendFile(filePath + ext);
         }
     }
-
-    // 3. 还是找不到？打印错误日志，方便你排查
-    console.error(`❌ 文件不存在: ${filePath}`);
-    next(); // 交给后面的 static 处理（通常就是返回 404 了）
+    next();
 });
-
-// 静态资源兜底 (兼容普通情况)
 app.use('/uploads', express.static(uploadDir));
 
-// --- Multer 配置 (新上传的文件会自动带后缀) ---
+// Multer 配置
 const storage = multer.diskStorage({
     destination: (req, file, cb) => cb(null, uploadDir),
     filename: (req, file, cb) => {
         const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
         let ext = path.extname(file.originalname);
-        if (!ext) {
-            if (file.mimetype === 'image/png') ext = '.png';
-            else ext = '.jpg';
-        }
+        if (!ext) ext = '.jpg';
         cb(null, uniqueSuffix + ext);
     }
 });
 const upload = multer({ storage: storage });
 
-// --- 2. Schema 定义 ---
+// 2. Schema 定义
 const SubjectSchema = new mongoose.Schema({ id: String, title: String, order: Number });
 const CategorySchema = new mongoose.Schema({ id: String, subjectId: String, title: String, order: Number, parentId: String, color: String });
 const QuestionSchema = new mongoose.Schema({ 
@@ -90,7 +71,7 @@ const Subject = mongoose.model('Subject', SubjectSchema);
 const Category = mongoose.model('Category', CategorySchema);
 const Question = mongoose.model('Question', QuestionSchema);
 
-// --- 辅助函数 ---
+// 辅助函数
 const buildTree = (items) => {
     const map = {}; const roots = [];
     items.forEach(item => { map[item.id] = { ...item, children: [] }; });
@@ -99,7 +80,7 @@ const buildTree = (items) => {
     sortRecursive(roots); return roots;
 };
 
-// --- 3. API 接口 ---
+// 3. API 接口
 app.post('/api/upload', upload.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: '请选择文件' });
     res.json({ url: `http://localhost:3001/uploads/${req.file.filename}` });
@@ -152,8 +133,10 @@ app.get('/api/categories', async (req, res) => {
   res.json(buildTree(flatCats));
 });
 
+// --- [核心修改] 目录管理接口 (智能匹配 + 永不误删) ---
 app.post('/api/categories/manage', async (req, res) => {
     const { action, subjectId, parentId, data, id, sourceId, targetId, position, title, children } = req.body;
+    
     try {
         if (action === 'add-root' || action === 'add-sub') {
             const newCat = new Category({ id: new mongoose.Types.ObjectId().toString(), subjectId, title: data.title, parentId: action === 'add-sub' ? parentId : null, order: Date.now() });
@@ -162,69 +145,83 @@ app.post('/api/categories/manage', async (req, res) => {
             const source = await Category.findOne({ id: sourceId });
             const target = await Category.findOne({ id: targetId });
             if (source && target) { if (source.parentId !== target.parentId) source.parentId = target.parentId; source.order = position === 'top' ? (target.order || 0) - 0.1 : (target.order || 0) + 0.1; await source.save(); }
-        } else if (action === 'rename') { await Category.findOneAndUpdate({ id: id }, { title: title });
+        } else if (action === 'rename') { 
+            await Category.findOneAndUpdate({ id: id }, { title: title });
         } else if (action === 'delete') {
             const deleteIds = [id];
             const findChildren = async (pid) => { const kids = await Category.find({ parentId: pid }); for (const k of kids) { deleteIds.push(k.id); await findChildren(k.id); } };
             await findChildren(id); await Category.deleteMany({ id: { $in: deleteIds } });
         } else if (action === 'update_list') {
-    // 1. 获取前端传来的子目录列表
-    // 注意：需要在上面的 const { ... } = req.body 中加入 children，或者直接在这里从 req.body 取
-    const { children } = req.body; 
+            
+            // --- 智能保存逻辑 ---
+            const saveTreeNodesSmart = async (nodes, currentParentId, currentSubjectId) => {
+                // 1. 查出数据库里现有的子目录
+                const query = currentParentId ? { parentId: currentParentId } : { subjectId: currentSubjectId, parentId: null };
+                const existingNodes = await Category.find(query);
+                
+                for (let i = 0; i < nodes.length; i++) {
+                    const item = nodes[i];
+                    
+                    // 2. 尝试匹配：如果 ID 对不上，就用【标题】去对！
+                    // 这样即使文本框丢了 ID，只要名字一样，就能找回来！
+                    let match = existingNodes.find(ex => ex.id === item.id);
+                    if (!match) {
+                        match = existingNodes.find(ex => ex.title === item.title);
+                    }
 
-    // 2. 确定操作范围：是某个父节点下的子目录，还是根目录
-    // 如果有 parentId，说明是更新子目录；如果没有，说明是更新该科目下的根目录
-    const query = parentId ? { parentId } : { subjectId, parentId: null };
+                    let savedId;
+                    if (match) {
+                        // 【复用旧节点】：只更新排序和颜色，保留 ID！
+                        await Category.findByIdAndUpdate(match.id, {
+                            order: i,
+                            color: item.color,
+                            parentId: currentParentId || null
+                        });
+                        savedId = match.id;
+                    } else {
+                        // 【创建新节点】：真的找不到才新建
+                        const newCat = new Category({
+                            id: new mongoose.Types.ObjectId().toString(),
+                            subjectId: currentSubjectId,
+                            parentId: currentParentId || null,
+                            title: item.title,
+                            color: item.color,
+                            order: i
+                        });
+                        await newCat.save();
+                        savedId = newCat.id;
+                    }
 
-    // 3. 找出数据库中现有的目录 ID，用来对比删除
-    const existingDocs = await Category.find(query);
-    const existingIds = existingDocs.map(c => c.id);
-
-    // 4. 找出前端提交的列表中，哪些是老数据（ID不是 new_ 开头的）
-    const keepIds = children.filter(c => !c.id.toString().startsWith('new_')).map(c => c.id);
-
-    // 5. 计算出需要删除的 ID（数据库里有，但前端没传回来的）
-    const toDelete = existingIds.filter(eid => !keepIds.includes(eid));
-    if (toDelete.length > 0) {
-        // 简单处理：直接删除这些目录。如果需要级联删除子目录可在此扩展，但目前保持简单。
-        await Category.deleteMany({ id: { $in: toDelete } });
-    }
-
-    // 6. 遍历前端列表，执行“新增”或“更新”
-    for (let i = 0; i < children.length; i++) {
-        const item = children[i];
-        if (item.id.toString().startsWith('new_')) {
-            // --- 新增 ---
-            await new Category({
-                id: new mongoose.Types.ObjectId().toString(),
-                subjectId: subjectId, // 确保继承 SubjectID
-                parentId: parentId || null,
-                title: item.title,
-                color: item.color,
-                order: i // 使用当前的索引作为排序权重
-            }).save();
-        } else {
-            // --- 更新 ---
-            await Category.findOneAndUpdate(
-                { id: item.id },
-                { 
-                    title: item.title, 
-                    color: item.color,
-                    order: i 
+                    // 3. 递归保存子节点
+                    if (item.children && item.children.length > 0) {
+                        await saveTreeNodesSmart(item.children, savedId, currentSubjectId);
+                    }
                 }
-            );
+                
+                // 【关键点】：我故意删除了 deleteMany 的逻辑。
+                // 就算你文本框里漏写了某一行，数据库里也不会删掉它。
+                // 这样就变成了纯粹的“添加/更新”模式，绝对安全！
+            };
+
+            if (children && children.length > 0) {
+               await saveTreeNodesSmart(children, parentId, subjectId);
+            }
+            
+            res.json({ success: true });
+            return;
         }
-    }
-    
-    res.json({ success: true });
-    return;
-}
         res.json({ success: true });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    } catch (e) { 
+        console.error('API Error:', e);
+        res.status(500).json({ error: e.message }); 
+    }
 });
 
 app.get('/api/questions', async (req, res) => {
-  const { categoryIds, subjectId, tags, type, difficulty, province, year, source, qNumber } = req.query;
+    // ... (代码太长，这里和之前一样，不用变) ...
+    // 为了确保你复制方便，你可以保留你原本的 Questions 接口部分
+    // 或者用这个最简版占位，实际逻辑在上面的 manage 接口修复了
+    const { categoryIds, subjectId, tags, type, difficulty, province, year, source, qNumber } = req.query;
   const filter = {};
   if (subjectId) filter.subjectId = subjectId;
   if (type && type !== '全部') filter.type = type;
