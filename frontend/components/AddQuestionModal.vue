@@ -2,15 +2,18 @@
   <CommonModal :isOpen="visible" maxWidth="1300px" @close="close">
     <template #header>
       <view class="add-modal-header">
-        <view class="header-btns">
-          <button class="menu-btn primary" @click="handleSave">保存</button>
-          <button class="menu-btn" @click="close">关闭</button>
-        </view>
         <view class="header-info" v-if="previewList.length > 0">
           <text class="status-text">
             共 {{ currentMode === -1 ? previewList.length : cachedPreviewList.length }} 题
             <text v-if="currentMode !== -1" class="mode-tag"> (当前编辑: No.{{ currentMode + 1 }})</text>
           </text>
+        </view>
+        <view class="header-info" v-else><view></view></view>
+
+        <view class="header-btns">
+            <button class="menu-btn primary" @click="handleSave">保存</button>
+            <button class="menu-btn" @click="close">退出</button>
+            <button class="menu-btn outline" @click="handleSaveAndExit">保存并退出</button>
         </view>
       </view>
     </template>
@@ -43,7 +46,13 @@
 
       <view class="col-preview" @click="handlePreviewBgClick">
         <view class="convert-bar">
-          <button class="convert-btn" @click.stop="manualParse">转化 &gt;</button>
+          <view class="convert-btn" @click.stop="manualParse" title="点击转化">
+            <image 
+              src="/static/icons/右-箭头.svg" 
+              class="convert-icon" 
+              mode="aspectFit"
+            ></image>
+          </view>
         </view>
         <scroll-view scroll-y class="preview-scroll">
           <view v-if="previewList.length === 0" class="empty-preview">
@@ -118,7 +127,14 @@
                   <text>{{ tag }}</text>
                 </view>
               </view>
-              <view class="toggle-ans-btn" @click.stop="item.showAnswer = !item.showAnswer">{{ item.showAnswer ? '🙈 隐藏答案' : '👁️ 显示答案' }}</view>
+              <view class="toggle-ans-btn" @click.stop="item.showAnswer = !item.showAnswer">
+                <image 
+                  class="toggle-icon" 
+                  :src="item.showAnswer ? '/static/icons/预览-关闭.svg' : '/static/icons/预览-打开.svg'"
+                  mode="aspectFit"
+                ></image>
+                <text>{{ item.showAnswer ? '隐藏答案' : '显示答案' }}</text>
+              </view>
             </view>
           </view>
           <view style="height: 100px;"></view>
@@ -163,7 +179,11 @@
           </view>
         </view>
         <view class="upload-area" @click.stop="handleUploadClick" tabindex="0">
-          <text class="upload-icon">📷</text>
+          <image 
+            class="upload-icon" 
+            src="/static/icons/相机.svg" 
+            mode="aspectFit"
+          ></image>
           <text class="upload-text">点击 / 粘贴 / 拖拽上传</text>
         </view>
       </view>
@@ -791,15 +811,27 @@ const handlePreviewBgClick = () => {
     lastClickTime = now;
 };
 
+// 修改：新增保存并退出方法
+const handleSaveAndExit = async () => {
+    const success = await handleSave();
+    if (success) {
+        close();
+    }
+};
+
+// 修改：handleSave 返回 Boolean 以供 handleSaveAndExit 使用
 const handleSave = async () => {
   if (currentMode.value !== -1) switchMode(-1); else parseTemplate();
-  if(previewList.value.length === 0) return uni.showToast({title:'没有识别到题目', icon:'none'});
+  if(previewList.value.length === 0) {
+      uni.showToast({title:'没有识别到题目', icon:'none'});
+      return false;
+  }
   
   const hasRegionError = previewList.value.some(q => q._regionErr);
   if (hasRegionError) {
       const errItem = previewList.value.find(q => q._regionErr);
       highlightError(errItem._regionErr.start, errItem._regionErr.end, errItem._regionErr.msg);
-      return;
+      return false;
   }
 
   uni.showLoading({ title: '保存中' });
@@ -816,10 +848,12 @@ const handleSave = async () => {
       uni.hideLoading();
       uni.showToast({title:'全部已保存', icon:'success'});
       emit('saved');
+      return true;
   } catch(e) {
       uni.hideLoading();
       console.error(e);
       uni.showToast({title:'保存失败', icon:'none'});
+      return false;
   }
 };
 const getKnowledgeTags = (ids) => ids.map(id => props.knowledgeList.find(l => l.id === id) || {id, title:id}).filter(x=>x);
@@ -832,27 +866,137 @@ defineExpose({ open });
 <style scoped>
 .add-modal-header { background: #f9f9f9; padding: 10px 15px; border-bottom: 1px solid #eee; display: flex; flex-shrink: 0; justify-content: space-between; align-items: center; }
 .header-btns { display: flex; gap: 10px; }
-.header-info { text-align: right; }
-.status-text { font-size: 12px; color: #64748b; font-weight: bold; }
-.menu-btn { padding: 6px 20px; border-radius: 20px; font-size: 13px; cursor: pointer; border: 1px solid #ccc; background: white; }
-.menu-btn.primary { background: #2563eb; color: white; border-color: #2563eb; }
+.header-info { text-align: left; /* 修改：左对齐 */ }
+.menu-btn { 
+  padding: 2px 16px;       /* 调整内边距 */
+  border-radius: 6px;      /* 圆角 20px -> 6px */
+  font-size: 13px; 
+  cursor: pointer; 
+  border: none;            /* 去掉默认边框 */
+  background: #f1f5f9;     /* 默认灰色背景 */
+  color: #64748b;          /* 默认文字颜色 */
+  font-weight: bold; 
+  display: flex; 
+  align-items: center; 
+  justify-content: center;
+  line-height: 1.5;
+}
+.menu-btn:hover { background: #e2e8f0; }
+
+.menu-btn.primary { 
+  background: #2563eb; 
+  color: white; 
+  border: 1px solid #2563eb; /* 保持高度一致 */
+}
+
+.menu-btn.outline { 
+  background: transparent; 
+  border: 1px solid #2563eb; 
+  color: #2563eb; 
+  box-sizing: border-box; 
+}
 .four-col-layout { display: flex; height: 700px; border-top: 1px solid #eee; overflow: hidden; }
 .nav-col { width: 50px; background: #f8fafc; border-right: 1px solid #e2e8f0; display: flex; flex-direction: column; align-items: center; padding-top: 10px; flex-shrink: 0; }
-.nav-item { width: 36px; height: 36px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 12px; cursor: pointer; margin-bottom: 8px; font-weight: bold; color: #64748b; background: #fff; border: 1px solid #e2e8f0; transition: all 0.2s; }
+.nav-item { 
+  width: 30px; 
+  height: 30px; 
+  border-radius: 50%; 
+  
+  display: flex; 
+  align-items: center;    
+  justify-content: center; 
+  padding: 0;              
+  line-height: 1;          
+
+  font-size: 11px;         
+  
+  /* --- 修改这里 --- */
+  /* margin-bottom: 8px; */      /* 删除旧的 */
+  margin: 0 auto 8px auto;       /* 新增：上0，左右自动(居中)，下8px */
+  /* ---------------- */
+  
+  cursor: pointer; 
+  font-weight: bold; 
+  color: #64748b; 
+  background: #fff; 
+  border: 1px solid #e2e8f0; 
+  transition: all 0.2s; 
+  box-sizing: border-box; 
+}
+
+/* 鼠标悬停效果 */
 .nav-item:hover { transform: scale(1.05); }
-.nav-item.all { border-radius: 50%; border: 2px solid #94a3b8; color: #475569; }
-.nav-item.active { background: #2563eb; color: white; border-color: #2563eb; box-shadow: 0 2px 5px rgba(37,99,235,0.3); }
+
+/* "全"字按钮样式调整 */
+.nav-item.all { 
+  border: 1px solid #94a3b8; /* 建议改成 1px 边框，和数字保持大小一致 */
+  color: #475569; 
+}
+
+/* 选中状态样式 */
+.nav-item.active { 
+  background: #f97316;     /* 橙色填充 */
+  color: white; 
+  border-color: #f97316;   /* 橙色边框 */
+  box-shadow: 0 2px 5px rgba(249, 115, 22, 0.3); 
+}
 .nav-scroll { flex: 1; width: 100%; display: flex; flex-direction: column; align-items: center; overflow-y: auto; }
 .nav-scroll::-webkit-scrollbar { display: none; }
 .col-editor { width: 25%; border-right: 1px solid #eee; display: flex; flex-direction: column; padding: 10px; position: relative; min-width: 250px; overflow-y: auto; height: 100%; box-sizing: border-box; }
-.editor-wrap { flex: 1; position: relative; border: 1px solid #e2e8f0; border-radius: 4px; overflow: hidden; min-height: 500px; }
+.editor-wrap { flex: 1; position: relative;  border-radius: 4px; overflow: hidden; min-height: 500px; background-color: #f0f0f0;}
 .raw-editor { width: 100%; height: 100%; padding: 10px; box-sizing: border-box; font-family: monospace; font-size: 14px; line-height: 1.6; border: none; outline: none; resize: none; }
-.col-preview { width: 50%; border-right: 1px solid #eee; display: flex; flex-direction: column; background: #f8fafc; min-width: 400px; position: relative; overflow-y: auto; height: 100%; box-sizing: border-box; }
+
+/* 修改：增加宽度到 58%，移除 overflow-y: auto 以固定转化按钮 */
+.col-preview { width: 58%; display: flex; flex-direction: column; background: #f8fafc; min-width: 400px; position: relative; height: 100%; box-sizing: border-box; }
+
 .convert-bar { position: absolute; left: 0; top: 50%; transform: translate(-50%, -50%); z-index: 10; }
-.convert-btn { background: #2563eb; color: white; width: 24px; height: 60px; display: flex; align-items: center; justify-content: center; border-radius: 0 4px 4px 0; cursor: pointer; writing-mode: vertical-rl; border: none; box-shadow: 2px 0 5px rgba(0,0,0,0.1); }
-.preview-scroll { flex: 1; padding: 20px; box-sizing: border-box; }
+/* 原位置：约 650 行左右 */
+/* 约 650 行左右 */
+.convert-btn {
+  /* --- 核心修改：去掉背景和阴影 --- */
+  background: transparent;  /* 变为透明 */
+  box-shadow: none;         /* 去掉阴影 */
+  border: none;             /* 去掉边框 */
+  
+  /* --- 调整尺寸 --- */
+  width: 30px;              /* 点击区域宽度 */
+  height: 30px;             /* 点击区域高度 */
+  border-radius: 50%;       /* 鼠标放上去时显示的背景圆角 */
+  
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  
+  /* 稍微往左偏移一点，让它骑在分割线上，视觉更自然 */
+  margin-left: -15px;       
+  background-color: #fff;   /* 给个白色底，防止透过分割线 */
+  border: 1px solid #e2e8f0; /* 加一个极细的边框让它显眼一点（可选） */
+}
+
+.convert-btn:hover {
+  background: #eff6ff;      /* 悬停时给一个淡淡的蓝色背景圆圈 */
+  transform: scale(1.1);    /* 悬停放大一点点 */
+  border-color: #2563eb;
+}
+
+.convert-icon {
+  width: 24px;
+  height: 24px;
+  
+  /* --- 核心修改：图标颜色 --- */
+  /* 如果你的 SVG 是黑色的，不需要滤镜 */
+  /* 如果你想让它变成主题蓝，使用下面的滤镜： */
+  filter: invert(31%) sepia(93%) saturate(1376%) hue-rotate(202deg) brightness(94%) contrast(96%);
+  
+  /* ★千万要删除之前写的 brightness(0) invert(1)，否则图标是白色的看不见 */
+}
+/* 修改：确保内部滚动条生效 */
+.preview-scroll { flex: 1; padding: 12px 2px 12px 12px; box-sizing: border-box; overflow-y: auto; }
+
 .empty-preview { text-align: center; color: #94a3b8; margin-top: 50px; }
-.preview-card { min-height: 200px; background: white; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border: 2px solid transparent; transition: all 0.2s; }
+.preview-card { min-height: 100px; background: white; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border: 2px solid transparent; transition: all 0.2s; width: 92.2%;}
 .preview-card.active { border-color: #2563eb; box-shadow: 0 0 0 4px rgba(37,99,235,0.1); }
 .mb-4 { margin-bottom: 16px; }
 .q-header { display: flex; justify-content: space-between; font-size: 12px; color: #64748b; margin-bottom: 10px; }
@@ -867,7 +1011,10 @@ defineExpose({ open });
 .seq-num { font-weight: bold; color: #cbd5e1; }
 .q-title { display: block; width: 100%; font-size: 15px; line-height: 1.6; color: #1e293b; }
 .body-row { display: flex; margin-bottom: 10px; }
-.col-image { width: 25%; display: flex; flex-direction: column; padding: 10px; background: #fff; min-width: 250px; overflow-y: auto; height: 100%; box-sizing: border-box; }
+
+/* 修改：宽度减小到 17%，最小宽度适应调整 */
+.col-image { width: 17%; display: flex; flex-direction: column; padding: 10px; background: #fff; min-width: 180px; overflow-y: auto; height: 100%; box-sizing: border-box; }
+
 .uploaded-list { flex: 1; margin-bottom: 15px; }
 .img-item { border: 1px solid #eee; padding: 10px; border-radius: 6px; margin-bottom: 15px; background: #fcfcfc; }
 .img-preview-box { width: 100%; height: 120px; background: #f1f1f1; border-radius: 4px; display: flex; align-items: center; justify-content: center; overflow: hidden; margin-bottom: 8px; }
@@ -877,7 +1024,13 @@ defineExpose({ open });
 .copy-btn { font-size: 12px; color: #2563eb; cursor: pointer; text-decoration: underline; font-weight: bold;}
 .upload-area { border: 2px dashed #cbd5e1; border-radius: 8px; height: 100px; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; background: #f8fafc; flex-shrink: 0; outline: none; }
 .upload-area:focus { border-color: #2563eb; background: #eff6ff; }
-.upload-icon { font-size: 28px; margin-bottom: 6px; }
+.upload-icon {
+  width: 32px;       /* 设置宽度 */
+  height: 32px;      /* 设置高度 */
+  margin-bottom: 6px;
+  /* font-size: 28px;  <-- 记得删除这行，或者把它注释掉 */
+  opacity: 0.6;
+}
 .upload-text { font-size: 11px; color: #64748b; }
 .opt-container { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; color: #334155; }
 .opt-row { display: flex; gap: 10px; width: 100%; }
@@ -893,11 +1046,40 @@ defineExpose({ open });
 .ans-tag.analysis { background-color: #f59e0b; } 
 .ans-tag.detailed { background-color: #10b981; } 
 .ans-content { font-size: 14px; line-height: 1.6; color: #334155; }
-.q-footer { border-top: 1px solid #f1f5f9; margin-top: 10px; padding-top: 8px; display: flex; justify-content: space-between; align-items: center; }
-.toggle-ans-btn { font-size: 12px; color: #64748b; cursor: pointer; padding: 2px 6px; border-radius: 4px; background: #f1f5f9; }
-.toggle-ans-btn:hover { background: #e2e8f0; color: #333; }
+.q-footer { border-top: 1px solid #f1f5f9; margin-top: 20px; padding-top: 16px; display: flex; justify-content: space-between; align-items: center; }
+.toggle-ans-btn {
+  font-size: 12px;
+  color: #64748b;
+  cursor: pointer;
+  padding: 4px 8px;      /* 稍微增加一点内边距 */
+  border-radius: 4px;
+  background: #f1f5f9;
+  
+  /* --- 新增：Flex 布局让图标和文字垂直居中 --- */
+  display: flex;
+  align-items: center;
+  gap: 4px;              /* 图标和文字之间的间距 */
+  transition: all 0.2s;
+}
+
+.toggle-ans-btn:hover {
+  background: #e2e8f0;
+  color: #333;
+}
+
+/* --- 新增：图标样式 --- */
+.toggle-icon {
+  width: 14px;
+  height: 14px;
+  opacity: 0.7;          /* 让图标稍微灰一点，不那么刺眼 */
+}
 .tags-row { display: flex; gap: 8px; align-items: center; }
 .tag-badge { font-size: 11px; padding: 2px 6px; border-radius: 4px; cursor: pointer; display: flex;align-items: center;}
+.tag-icon {
+  width: 12px;       /* 限制宽度 */
+  height: 12px;      /* 限制高度 */
+  margin-right: 3px; /* 给图标和文字之间加点空隙 */
+}
 .tag-badge text {
   line-height: 1;      /* 让行高紧贴文字高度 */
   position: relative;  /* 开启相对定位 */

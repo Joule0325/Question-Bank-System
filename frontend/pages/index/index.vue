@@ -34,17 +34,78 @@
               </view>
       
               <view class="header-right">
-                <text class="status-txt">共 {{ questions.length }} 条</text>
-                <picker :range="[10, 20, 50]" @change="handlePageSizeChange">
-                  <text class="page-select">{{ itemsPerPage }}条/页 ▼</text>
-                </picker>
-                <view class="pagination">
-                  <button class="pg-btn" :disabled="currentPage===1" @click="changePage(-1)">&lt;</button>
-                  <text class="pg-num">{{ currentPage }} / {{ totalPages || 1 }}</text>
-                  <button class="pg-btn" :disabled="currentPage>=totalPages" @click="changePage(1)">&gt;</button>
+                
+                <view class="total-count-box">
+                  <text>共</text>
+                  <text class="tc-num">{{ questions.length }}</text>
+                  <text>题</text>
                 </view>
-              </view>
-            </view>
+                
+                <view class="page-size-wrap">
+                  <text class="ps-label">每页</text>
+                  <picker :range="[10, 20, 50]" @change="handlePageSizeChange">
+                    <view class="ps-box">
+                      <text class="ps-text">{{ itemsPerPage }}</text>
+					  <image src="/static/icons/三角.svg" class="ps-icon" mode="aspectFit" />
+                    </view>
+                  </picker>
+                  <text class="ps-label">题</text>
+                </view>
+
+                <view class="pagination-bar">
+                  <image 
+                    src="/static/icons/左-圆.svg" 
+                    class="pg-circle-btn" 
+                    :class="{ disabled: currentPage === 1 }"
+                    @click="changePage(-1)" 
+                    mode="aspectFit"
+                  />
+
+                  <view class="pg-numbers">
+                    <view 
+                      v-for="(item, index) in visiblePages" 
+                      :key="item.key" 
+                      class="pg-num-circle" 
+                      :class="{ active: item.isActive }"
+                      @click="goToPage(item.val)"
+                    >
+                      {{ item.val }}
+                    </view>
+                  </view>
+
+                  <view class="pg-more-wrap" v-if="totalPages > 5">
+                    <image 
+                      src="/static/icons/更多.svg" 
+                      class="pg-more-icon" 
+                      @click.stop="toggleJumpPopover"
+                      mode="aspectFit"
+                    />
+                    <view class="jump-popover" v-if="showJumpPopover" @click.stop>
+                      <input 
+                        class="jump-input" 
+                        v-model="jumpPageInput" 
+                        type="number" 
+                        :focus="showJumpPopover" 
+                        @confirm="handleJumpConfirm" 
+                      />
+                      <view class="jump-go-btn" @click="handleJumpConfirm">Go</view>
+                    </view>
+                  </view>
+
+                  <view class="pg-total-text" v-if="totalPages > 5">
+                    共 {{ totalPages }} 页
+                  </view>
+
+                  <image 
+                    src="/static/icons/右-圆.svg" 
+                    class="pg-circle-btn" 
+                    :class="{ disabled: currentPage >= totalPages }"
+                    @click="changePage(1)" 
+                    mode="aspectFit"
+                  />
+                </view>
+                </view>
+      </view>
 
       <view class="workspace-body">
         
@@ -53,7 +114,7 @@
             <view class="res-header">
               <view class="subject-wrapper" @click.stop="subjectDropdownOpen = !subjectDropdownOpen">
                 <view class="subject-btn">
-				  <text>{{ currentSubjectName }}</text>
+                  <text>{{ currentSubjectName }}</text>
                   <image src="/static/icons/三角.svg" class="arrow-icon" mode="aspectFit"></image>
                 </view>
                 <view class="custom-subject-dropdown" v-if="subjectDropdownOpen">
@@ -227,7 +288,7 @@
                     ></image>
                     <text>{{ tag.title || tag }}</text>
                   </view>
-                
+                  
                   <view v-for="tag in (q.tags||[])" :key="'t-'+tag" class="tag-badge blue" @click.stop="handleTagClick(tag)">
                     <image 
                       src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMyIgaGVpZ2h0PSIyMyIgdmlld0JveD0iMCAwIDQ4IDQ4IiBmaWxsPSJub25lIj48cGF0aCBkPSJNOCA0NEw4IDZDOCA0Ljg5NTQzIDguODk1NDMgNCAxMCA0SDM4QzM5LjEwNDYgNCA0MCA0Ljg5NTQzIDQwIDZWNDRMMjQgMzUuNzI3M0w4IDQ0WiIgZmlsbD0iIzNiODJmNiIgc3Ryb2tlPSIjM2I4MmY2IiBzdHJva2Utd2lkdGg9IjMiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48cGF0aCBkPSJNMTYgMThIMzIiIHN0cm9rZT0iI0ZGRiIgc3Ryb2tlLXdpZHRoPSIzIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48L3N2Zz4=" 
@@ -374,6 +435,10 @@ const filterYear = ref('');
 const filterSource = ref('');
 const filterQNumber = ref('');
 
+// --- [分页新增] 状态变量 ---
+const showJumpPopover = ref(false);
+const jumpPageInput = ref('');
+
 let debounceTimer = null;
 
 const currentSubjectName = computed(() => subjects.value[currentSubjectIdx.value]?.title || '加载中');
@@ -405,6 +470,72 @@ const allActiveFilters = computed(() => {
     if(filterQNumber.value) list.push({ type: 'qnum', id: 'qn', name: '#' + filterQNumber.value });
     return list;
 });
+
+// --- [分页新增] 核心修改：固定槽位计算逻辑 ---
+const visiblePages = computed(() => {
+  const total = totalPages.value || 1;
+  const current = currentPage.value;
+  const maxVisible = 5;
+
+  // 1. 页数少于等于5：正常显示，不涉及“中间圆圈不动”的问题
+  if (total <= maxVisible) {
+    return Array.from({length: total}, (_, i) => {
+        const p = i + 1;
+        return { 
+            val: p, 
+            key: 'p-'+p, // 普通模式key用页码，正常切换
+            isActive: p === current
+        };
+    });
+  }
+
+  // 2. 页数大于5：采用“固定槽位”策略
+  // 无论当前是第几页，我们都生成5个item
+  // 我们计算这5个item显示的数值，尽量让current在中间 (index 2)
+  
+  let start = current - 2;
+  
+  // 边界处理：防止超出
+  if (start < 1) start = 1;
+  if (start + 4 > total) start = total - 4; // 保证始终显示5个
+
+  const arr = [];
+  for(let i = 0; i < 5; i++) {
+      const p = start + i;
+      arr.push({
+          val: p,
+          // 【绝对关键】：key 绑定为 'slot-0', 'slot-1'... 
+          // 这样 Vue 认为这 5 个 DOM 元素从未变过，只是里面的 text 变了。
+          // 圆圈 active 状态如果一直对应 slot-2，那圆圈就真的一动不动。
+          key: 'slot-' + i, 
+          isActive: p === current
+      });
+  }
+  return arr;
+});
+
+// --- [分页新增] 跳转逻辑 ---
+const goToPage = (p) => {
+  if (p === currentPage.value) return;
+  currentPage.value = p;
+  loadQuestions();
+};
+
+const toggleJumpPopover = () => {
+  showJumpPopover.value = !showJumpPopover.value;
+  if(showJumpPopover.value) jumpPageInput.value = '';
+};
+
+const handleJumpConfirm = () => {
+  const p = parseInt(jumpPageInput.value);
+  if (p && p >= 1 && p <= totalPages.value) {
+    currentPage.value = p;
+    loadQuestions();
+    showJumpPopover.value = false;
+  } else {
+    uni.showToast({title:'页码无效', icon:'none'});
+  }
+};
 
 watch([selectedType, selectedDiff, selectedTags, selectedCategoryIds], () => {
     currentPage.value = 1;
@@ -696,6 +827,7 @@ const toggleAnswer = (id) => showAnswerMap.value[id] = !showAnswerMap.value[id];
 const handleGlobalClick = (e) => {
     manageMenuOpen.value = false;
     subjectDropdownOpen.value = false;
+    showJumpPopover.value = false; // [修改点] 点击全局关闭跳转弹窗
 };
 </script>
 
@@ -996,13 +1128,202 @@ page { height: 100%; overflow: hidden; font-family: "Times New Roman", "SimSun",
 .header-right { 
     display: flex; 
     align-items: center; 
-    gap: 15px; 
+    gap: 20px; /* 稍微拉大间距 */
     font-size: 13px; 
     color: #64748b; 
 }
-.page-select { cursor: pointer; }
-.pagination { display: flex; gap: 8px; align-items: center; }
-.pg-btn { padding: 0 10px; height: 26px; line-height: 24px; font-size: 12px; }
+
+/* 1. 总题数 */
+.total-count-box {
+    display: flex;
+    align-items: baseline; /* 基线对齐，让数字更好看 */
+    font-size: 13px;
+    color: #64748b;
+}
+.tc-num {
+    font-size: 18px;     /* 数字放大 */
+    font-weight: bold;
+    color: #334155;
+    margin: 0 4px;
+    font-family: monospace; /* 可选：等宽字体数字 */
+}
+
+/* 2. 每页数选择器 */
+.page-size-wrap {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.ps-label {
+    color: #64748b;
+}
+.ps-box {
+    display: flex;
+    align-items: center;
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 4px;      /* 圆角矩形 */
+    padding: 6px 6px;
+    height: 25px;            /* 固定高度 */
+    box-sizing: border-box;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.ps-box:hover {
+    border-color: #cbd5e1;
+    background: #f8fafc;
+}
+.ps-icon {
+    width: 10px;
+    height: 10px;
+    margin-left: 8px;       /* 图标在数字左边 */
+    opacity: 0.6;
+    transform: rotate(180deg);
+    margin-bottom: 0.8px;
+}
+.ps-text {
+    font-weight: 500;
+    color: #334155;
+}
+
+/* --- [新增] 分页器样式 --- */
+.pagination-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px; /* 元素之间的间距 */
+    margin-left: 10px; /* 与左边每页条数的间距 */
+}
+
+/* 左右圆图标 */
+.pg-circle-btn {
+    width: 28px;
+    height: 28px;
+    cursor: pointer;
+    opacity: 0.8;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.pg-circle-btn:hover {
+    opacity: 1;
+    transform: scale(1.1);
+}
+.pg-circle-btn.disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* 页码数字容器 */
+.pg-numbers {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* 单个页码圆圈 */
+.pg-num-circle {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%; /* 圆形 */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: #64748b;
+    font-weight: 500;
+    font-size: 13px;
+    
+    /* 核心：只对颜色变化做过渡，位置是不动的 */
+    transition: background-color 0.2s ease, color 0.2s ease;
+    
+    /* 关键：防止数字变动时引起宽度抖动 */
+    font-variant-numeric: tabular-nums;
+}
+.pg-num-circle:hover {
+    background: #f1f5f9;
+    color: #334155;
+}
+
+/* 选中状态：橙色背景 + 白字 */
+.pg-num-circle.active {
+    background: #F87F23; 
+    color: white;
+    box-shadow: 0 2px 4px rgba(248, 127, 35, 0.3);
+    /* 稍微放大一点增加质感 */
+    transform: scale(1.05); 
+}
+
+/* 更多图标区域 */
+.pg-more-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.pg-more-icon {
+    width: 20px;
+    height: 20px;
+    cursor: pointer;
+    opacity: 0.6;
+    margin: 0 4px;
+}
+.pg-more-icon:hover {
+    opacity: 1;
+}
+
+/* 跳转弹窗 (显示在图标下方) */
+.jump-popover {
+    position: absolute;
+    top: 32px; /* 图标高度下面 */
+    left: 50%;
+    transform: translateX(-50%);
+    background: white;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    border-radius: 6px;
+    padding: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    z-index: 999;
+    
+    /* 小三角 (指向上面) */
+}
+.jump-popover::before {
+    content: '';
+    position: absolute;
+    top: -5px;
+    left: 50%;
+    transform: translateX(-50%);
+    border-width: 0 5px 5px 5px;
+    border-style: solid;
+    border-color: transparent transparent white transparent;
+}
+
+.jump-input {
+    width: 50px;
+    height: 26px;
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    text-align: center;
+    font-size: 13px;
+    background: #f8fafc;
+}
+
+.jump-go-btn {
+    background: #F87F23;
+    color: white;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.pg-total-text {
+    color: #94a3b8;
+    margin: 0 4px;
+    font-size: 13px;
+}
+
 .workspace-body { flex: 1; display: flex; overflow: hidden; height: 100%; }
 .resource-sidebar-wrapper { width: 300px; padding: 12px; flex-shrink: 0; display: flex; flex-direction: column; }
 .resource-sidebar { flex: 1; background: #F0F0F0; border-radius: 4px; display: flex; flex-direction: column; overflow: hidden; gap: 15px; padding-top: 15px;}
@@ -1363,7 +1684,7 @@ page { height: 100%; overflow: hidden; font-family: "Times New Roman", "SimSun",
   background: #f0f0f0;          /* [建议] 改为白色，配合阴影才有悬浮卡片感 */
   
   /* 圆角与间距 */
-  border-radius: 4px;          
+  border-radius: 4px;           
   margin: 12px 12px 12px 12px;     
   box-shadow: 0 2px 6px rgba(0,0,0,0.03); 
 
