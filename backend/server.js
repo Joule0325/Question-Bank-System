@@ -133,7 +133,80 @@ app.get('/api/categories', async (req, res) => {
   res.json(buildTree(flatCats));
 });
 
-// --- [核心修改] 目录管理接口 (智能匹配 + 永不误删) ---
+// ==========================================
+// [核心修改] 目录管理接口：支持 update_list 的递归同步
+// ==========================================
+
+// 辅助：递归删除某个分类及其所有子分类
+const deleteCategoryAndChildren = async (catId) => {
+    // 1. 找儿子
+    const children = await Category.find({ parentId: catId });
+    // 2. 递归杀儿子
+    for (const child of children) {
+        await deleteCategoryAndChildren(child.id);
+    }
+    // 3. 杀自己
+    await Category.deleteOne({ id: catId });
+};
+
+// 辅助：递归保存（同步）
+const syncCategoriesRecursive = async (nodes, parentId, subjectId) => {
+    // 1. 获取该层级下数据库中已有的节点
+    const query = parentId ? { parentId } : { subjectId, parentId: null };
+    const existingNodes = await Category.find(query);
+    
+    // 用于记录哪些旧节点被“复用”了，剩下的就是该删除的
+    const usedIds = new Set();
+
+    // 2. 遍历前端传来的新列表
+    for (let i = 0; i < nodes.length; i++) {
+        const node = nodes[i];
+        let currentId = null;
+
+        // 尝试用【标题】去匹配现有的节点
+        // (前端文本编辑会丢失ID，所以必须用标题找回，否则每次都会全删全建，导致题目关联丢失)
+        const match = existingNodes.find(ex => ex.title === node.title && !usedIds.has(ex.id));
+
+        if (match) {
+            // [A] 找到了：复用旧节点，更新顺序
+            match.order = i;
+            await match.save();
+            currentId = match.id;
+            usedIds.add(match.id);
+        } else {
+            // [B] 没找到：创建新节点
+            const newCat = new Category({
+                id: new mongoose.Types.ObjectId().toString(),
+                subjectId,
+                parentId: parentId || null,
+                title: node.title,
+                order: i
+            });
+            await newCat.save();
+            currentId = newCat.id;
+        }
+
+        // 3. 递归处理子节点
+        if (node.children && node.children.length > 0) {
+            await syncCategoriesRecursive(node.children, currentId, subjectId);
+        } else {
+            // 如果前端说这个节点没儿子，那我们也要确保数据库里没儿子
+            // 查一下有没有残留的子节点，有就全删了
+            const orphanChildren = await Category.find({ parentId: currentId });
+            for (const orphan of orphanChildren) {
+                await deleteCategoryAndChildren(orphan.id);
+            }
+        }
+    }
+
+    // 4. 清理当前层级中，未被使用的旧节点（即前端文本里删掉的那些行）
+    const toDelete = existingNodes.filter(ex => !usedIds.has(ex.id));
+    for (const d of toDelete) {
+        await deleteCategoryAndChildren(d.id);
+    }
+};
+
+
 app.post('/api/categories/manage', async (req, res) => {
     const { action, subjectId, parentId, data, id, sourceId, targetId, position, title, children } = req.body;
     
@@ -148,65 +221,13 @@ app.post('/api/categories/manage', async (req, res) => {
         } else if (action === 'rename') { 
             await Category.findOneAndUpdate({ id: id }, { title: title });
         } else if (action === 'delete') {
-            const deleteIds = [id];
-            const findChildren = async (pid) => { const kids = await Category.find({ parentId: pid }); for (const k of kids) { deleteIds.push(k.id); await findChildren(k.id); } };
-            await findChildren(id); await Category.deleteMany({ id: { $in: deleteIds } });
+            // 单个删除也使用递归删除逻辑
+            await deleteCategoryAndChildren(id);
         } else if (action === 'update_list') {
-            
-            // --- 智能保存逻辑 ---
-            const saveTreeNodesSmart = async (nodes, currentParentId, currentSubjectId) => {
-                // 1. 查出数据库里现有的子目录
-                const query = currentParentId ? { parentId: currentParentId } : { subjectId: currentSubjectId, parentId: null };
-                const existingNodes = await Category.find(query);
-                
-                for (let i = 0; i < nodes.length; i++) {
-                    const item = nodes[i];
-                    
-                    // 2. 尝试匹配：如果 ID 对不上，就用【标题】去对！
-                    // 这样即使文本框丢了 ID，只要名字一样，就能找回来！
-                    let match = existingNodes.find(ex => ex.id === item.id);
-                    if (!match) {
-                        match = existingNodes.find(ex => ex.title === item.title);
-                    }
-
-                    let savedId;
-                    if (match) {
-                        // 【复用旧节点】：只更新排序和颜色，保留 ID！
-                        await Category.findByIdAndUpdate(match.id, {
-                            order: i,
-                            color: item.color,
-                            parentId: currentParentId || null
-                        });
-                        savedId = match.id;
-                    } else {
-                        // 【创建新节点】：真的找不到才新建
-                        const newCat = new Category({
-                            id: new mongoose.Types.ObjectId().toString(),
-                            subjectId: currentSubjectId,
-                            parentId: currentParentId || null,
-                            title: item.title,
-                            color: item.color,
-                            order: i
-                        });
-                        await newCat.save();
-                        savedId = newCat.id;
-                    }
-
-                    // 3. 递归保存子节点
-                    if (item.children && item.children.length > 0) {
-                        await saveTreeNodesSmart(item.children, savedId, currentSubjectId);
-                    }
-                }
-                
-                // 【关键点】：我故意删除了 deleteMany 的逻辑。
-                // 就算你文本框里漏写了某一行，数据库里也不会删掉它。
-                // 这样就变成了纯粹的“添加/更新”模式，绝对安全！
-            };
-
-            if (children && children.length > 0) {
-               await saveTreeNodesSmart(children, parentId, subjectId);
+            // [核心逻辑]：全量同步子目录
+            if (children && Array.isArray(children)) {
+                await syncCategoriesRecursive(children, parentId, subjectId);
             }
-            
             res.json({ success: true });
             return;
         }
@@ -216,12 +237,10 @@ app.post('/api/categories/manage', async (req, res) => {
         res.status(500).json({ error: e.message }); 
     }
 });
+// ==========================================
 
 app.get('/api/questions', async (req, res) => {
-    // ... (代码太长，这里和之前一样，不用变) ...
-    // 为了确保你复制方便，你可以保留你原本的 Questions 接口部分
-    // 或者用这个最简版占位，实际逻辑在上面的 manage 接口修复了
-    const { categoryIds, subjectId, tags, type, difficulty, province, year, source, qNumber } = req.query;
+  const { categoryIds, subjectId, tags, type, difficulty, province, year, source, qNumber } = req.query;
   const filter = {};
   if (subjectId) filter.subjectId = subjectId;
   if (type && type !== '全部') filter.type = type;
