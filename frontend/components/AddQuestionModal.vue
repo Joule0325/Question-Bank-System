@@ -109,12 +109,6 @@
                                 @click.stop="handlePreviewTagClick(tag)"
                             >{{ tag }}</text>
                         </view>
-
-                        <view v-if="item.showAnswer" class="sub-q-ans-box">
-                             <view v-if="subQ.answer" class="mb-1"><text class="ans-label">[答案] </text><LatexText :text="subQ.answer"></LatexText></view>
-                             <view v-if="subQ.analysis"><text class="ans-label">[解析] </text><LatexText :text="subQ.analysis"></LatexText></view>
-                             <view v-if="subQ.detailed"><text class="ans-label">[详解] </text><LatexText :text="subQ.detailed"></LatexText></view>
-                        </view>
                     </view>
                 </view>
 
@@ -127,7 +121,7 @@
                   </view>
                 </view>
                 
-                <view class="answer-box mt-2" v-if="item.showAnswer && (!item.subQuestions || item.subQuestions.length === 0)">
+                <view class="answer-box mt-2" v-if="item.showAnswer">
                   <view class="ans-block" v-if="item.answer">
                     <view class="ans-tag answer">答案</view>
                     <view class="ans-content"><LatexText :text="item.answer"></LatexText></view>
@@ -147,12 +141,12 @@
             <view class="q-footer">
               <view class="tags-row">
                 <view v-for="tag in getKnowledgeTags(item.categoryIds)" :key="tag.id" class="tag-badge red">
-                  <image src="/static/icons/标签.svg" class="tag-icon" mode="aspectFit" style="filter: invert(36%) sepia(88%) saturate(3025%) hue-rotate(338deg) brightness(97%) contrast(93%);"></image>
+                  <image src="/static/icons/标签-红.svg" class="tag-icon" mode="aspectFit"></image>
                   <text>{{ tag.title }}</text>
                 </view>
                 
                 <view v-for="tag in item.tags" :key="tag" class="tag-badge blue">
-                  <image src="/static/icons/标签.svg" class="tag-icon" mode="aspectFit" style="filter: invert(41%) sepia(96%) saturate(1912%) hue-rotate(200deg) brightness(101%) contrast(96%);"></image>
+                  <image src="/static/icons/标签-蓝.svg" class="tag-icon" mode="aspectFit"></image>
                   <text>{{ tag }}</text>
                 </view>
               </view>
@@ -230,7 +224,8 @@ import { baseUrl } from '@/utils/request.js';
 const props = defineProps({
   visible: Boolean,
   subjectId: String,
-  knowledgeList: { type: Array, default: () => [] }
+  knowledgeList: { type: Array, default: () => [] },
+  isPublic: Boolean
 });
 
 const emit = defineEmits(['update:visible', 'saved']);
@@ -359,10 +354,9 @@ ${restoreTags(q.title || '')}
           }
 
           if (sq.tags && sq.tags.length) text += `##小题标签 ${sq.tags.join('/')}\n`;
-          if (sq.answer) text += `##答案 ${restoreTags(sq.answer)}\n`;
-          if (sq.analysis) text += `##分析 ${restoreTags(sq.analysis)}\n`;
-          if (sq.detailed) text += `##详解 ${restoreTags(sq.detailed)}\n`;
       });
+      // 小题模式下，统一在最后添加答案等
+      text += `##答案 \n${restoreTags(q.answer || '')}\n##分析 \n${restoreTags(q.analysis || '')}\n##详解 \n${restoreTags(q.detailed || '')}\n`;
   } else if (q.type && q.type.includes('选')) {
       text += `##选项 ${q.optionLayout || 4}\n`; 
       if(q.options) {
@@ -653,6 +647,7 @@ const parseSingleChunk = (chunkText, chunkStartOffset = 0) => {
             }
             if (currentSubQ && moduleName === '选项') {
                 if (content && /^\d+$/.test(content)) currentSubQ.optionLayout = parseInt(content);
+                // [修改] 确保 currentModule 设置正确，以便后续非 header 行能被添加到 rawOptionLines
                 currentModule = '小题_选项';
                 charCount += lineLen;
                 return;
@@ -686,9 +681,20 @@ const parseSingleChunk = (chunkText, chunkStartOffset = 0) => {
             
             currentModule = moduleName;
             
-            if (currentSubQ && ['答案', '分析', '详解'].includes(moduleName)) {
-                 if(content) currentSubQ[moduleName === '详解' ? 'detailed' : (moduleName === '分析' ? 'analysis' : 'answer')] = content;
-                 currentModule = '小题_' + moduleName; 
+            // [修改] 遇到答案、分析、详解时，强制切回主题目上下文，不再归属于小题
+            if (['答案', '分析', '详解'].includes(moduleName)) {
+                 pushCurrentSubQ(); 
+                 currentSubQ = null; // 退出小题模式
+                 // 如果内容不为空，直接添加到主对象
+                 if (content) {
+                     const key = moduleName === '详解' ? 'detailed' : (moduleName === '分析' ? 'analysis' : 'answer');
+                     qData[key] = content;
+                 }
+                 // 标记当前模块，以便后续行添加
+                 currentModule = moduleName; 
+            } else if (currentSubQ) {
+                 // 其他小题相关模块 (如小题标签) 保持在小题内
+                 // ... (此处逻辑已在上方处理)
             } else {
                  if (!result[currentModule]) result[currentModule] = [];
                  if (content) result[currentModule].push(content);
@@ -702,11 +708,16 @@ const parseSingleChunk = (chunkText, chunkStartOffset = 0) => {
             if (currentSubQ) {
                 if (currentModule === '小题内容') currentSubQ.content += processedLine + '\n';
                 else if (currentModule === '小题_选项') currentSubQ.rawOptionLines.push(processedLine);
-                else if (currentModule === '小题_答案') currentSubQ.answer += processedLine + '\n';
-                else if (currentModule === '小题_分析') currentSubQ.analysis += processedLine + '\n';
-                else if (currentModule === '小题_详解') currentSubQ.detailed += processedLine + '\n';
+                // 小题不再单独解析 答案/分析/详解
             } else {
-                if (currentModule) {
+                // [修改] 处理主对象的答案/分析/详解多行内容
+                if (['答案', '分析', '详解'].includes(currentModule)) {
+                    const key = currentModule === '详解' ? 'detailed' : (currentModule === '分析' ? 'analysis' : 'answer');
+                    // 如果该字段已有内容（来自header行），先加换行
+                    if (qData[key] && !qData[key].endsWith('\n')) qData[key] += '\n';
+                    qData[key] += processedLine + '\n';
+                }
+                else if (currentModule) {
                    if (trimmed === '//') result[currentModule].push('');
                    else result[currentModule].push(processedLine);
                 }
@@ -783,7 +794,8 @@ const parseSingleChunk = (chunkText, chunkStartOffset = 0) => {
         qData.optionRows = distributeOptions(rawOptions, targetCols);
     } else { qData.options = {}; qData.optionRows = []; }
 
-    qData.analysis = getVal('分析'); qData.answer = getVal('答案'); qData.detailed = getVal('详解');
+    // [修改] 移除这里对 qData.answer/analysis/detailed 的覆盖赋值，因为现在它们已经在循环中直接解析了
+    // qData.analysis = getVal('分析'); qData.answer = getVal('答案'); qData.detailed = getVal('详解');
     
     return qData;
 };
@@ -905,7 +917,7 @@ const handleSave = async () => {
   uni.showLoading({ title: '保存中' });
   try {
       for (const item of previewList.value) {
-          const payload = { ...item, subjectId: props.subjectId };
+          const payload = { ...item, subjectId: props.subjectId, isPublic: props.isPublic };
           delete payload.optionRows; delete payload.showAnswer; 
           delete payload.imgPosCode; delete payload.imgAlign; delete payload.imgId;
           delete payload._regionErr; delete payload.region; 

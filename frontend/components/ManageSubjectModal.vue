@@ -75,7 +75,7 @@ import { ref, watch } from 'vue';
 import CommonModal from '@/components/CommonModal.vue';
 import { baseUrl } from '@/utils/request.js';
 
-const props = defineProps(['visible', 'initialData']);
+const props = defineProps(['visible', 'initialData', 'mode']);
 const emit = defineEmits(['update:visible', 'saved']);
 const list = ref([]);
 
@@ -157,7 +157,8 @@ const handleSave = async () => {
     uni.showLoading({ title: '保存中...' });
     await uni.request({ 
       url: baseUrl + '/api/subjects/manage', method: 'POST', 
-      data: { action: 'update_list', list: list.value.map(item => ({ id: item.id, title: item.title })) } 
+      header: { Authorization: 'Bearer ' + uni.getStorageSync('token') },
+      data: { action: 'update_list', list: list.value.map(item => ({ id: item.id, title: item.title })), mode: props.mode } 
     });
     uni.hideLoading();
     uni.showToast({ title: '保存成功', icon: 'success' });

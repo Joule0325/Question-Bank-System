@@ -72,7 +72,7 @@ import CommonModal from '@/components/CommonModal.vue';
 import CategoryTree from '@/components/CategoryTree.vue';
 import { getCategories, manageCategory } from '@/api/question.js';
 
-const props = defineProps(['visible', 'subjectId']);
+const props = defineProps(['visible', 'subjectId', 'mode']);
 const emit = defineEmits(['update:visible', 'saved']);
 
 // 数据状态
@@ -84,7 +84,7 @@ const childEditText = ref('');
 // 数据加载
 const loadData = async () => {
   if (!props.subjectId) return;
-  const data = await getCategories(props.subjectId);
+  const data = await getCategories(props.subjectId, props.mode);
   manageTreeData.value = data || [];
   
   if (manageSelectedId.value) {
@@ -143,7 +143,8 @@ const handleNodeDrop = async ({ sourceId, targetId, position }) => {
       action: 'reorder',
       sourceId,
       targetId,
-      position: 'bottom'
+      position: 'bottom',
+      mode: props.mode
     });
     
     // 3. 刷新
@@ -208,7 +209,7 @@ const handleConfirmChildren = async () => {
   const newChildren = parseTextToTree(childEditText.value);
   try {
     uni.showLoading({ title: '保存中...' });
-    await manageCategory({ action: 'update_list', subjectId: props.subjectId, parentId: currentManageNode.value.id, children: newChildren });
+    await manageCategory({ action: 'update_list', subjectId: props.subjectId, parentId: currentManageNode.value.id, children: newChildren, mode: props.mode });
     await loadData();
     const node = findNode(manageTreeData.value, manageSelectedId.value);
     if(node) childEditText.value = treeToText(node.children || [], 0);
@@ -225,11 +226,11 @@ const handleGlobalSave = async () => {
   uni.showLoading({ title: '保存中...' });
   let hasError = false;
   try {
-    await manageCategory({ action: 'rename', id: currentManageNode.value.id, title: currentManageNode.value.title });
+    await manageCategory({ action: 'rename', id: currentManageNode.value.id, title: currentManageNode.value.title, mode: props.mode });
   } catch(e) { hasError = true; }
   try {
     const childrenFromText = parseTextToTree(childEditText.value);
-    await manageCategory({ action: 'update_list', subjectId: props.subjectId, parentId: currentManageNode.value.id, children: childrenFromText });
+    await manageCategory({ action: 'update_list', subjectId: props.subjectId, parentId: currentManageNode.value.id, children: childrenFromText, mode: props.mode });
   } catch(e) { hasError = true; }
   uni.hideLoading();
   if (!hasError) {
@@ -258,7 +259,7 @@ const deleteCurrentNode = async () => {
     content: `确定删除 [${currentManageNode.value.title}] 及其所有子目录吗？`,
     success: async (res) => {
       if(res.confirm) {
-        await manageCategory({ action: 'delete', id: currentManageNode.value.id });
+        await manageCategory({ action: 'delete', id: currentManageNode.value.id, mode: props.mode });
         currentManageNode.value = null;
         childEditText.value = '';
         manageSelectedId.value = null;

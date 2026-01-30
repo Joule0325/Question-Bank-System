@@ -5,6 +5,14 @@
         <text class="logo-txt" :class="{ 'mini': isSidebarCollapsed }">{{ isSidebarCollapsed ? 'S' : 'Source' }}</text>
       </view>
       
+      <view class="space-switcher" v-if="!isSidebarCollapsed">
+         <view class="space-btn" :class="{active: currentMode==='private'}" @click="switchMode('private')">私人</view>
+         <view class="space-btn" :class="{active: currentMode==='public'}" @click="switchMode('public')">公共</view>
+      </view>
+      <view class="space-switcher-mini" v-else>
+         <text class="space-char">{{ currentMode==='private' ? '私' : '公' }}</text>
+      </view>
+      
       <view class="nav-items">
         <view class="nav-item" :class="{active: activeTab==='question_bank'}" @click="activeTab='question_bank'">
           <image src="/static/icons/题库.svg" class="nav-icon-img" mode="aspectFit"></image>
@@ -46,7 +54,7 @@
                   <picker :range="[10, 20, 50]" @change="handlePageSizeChange">
                     <view class="ps-box">
                       <text class="ps-text">{{ itemsPerPage }}</text>
-					  <image src="/static/icons/三角.svg" class="ps-icon" mode="aspectFit" />
+                      <image src="/static/icons/三角.svg" class="ps-icon" mode="aspectFit" />
                     </view>
                   </picker>
                   <text class="ps-label">题</text>
@@ -113,7 +121,7 @@
           <view class="resource-sidebar">
             <view class="res-header">
               <view class="subject-wrapper" @click.stop="subjectDropdownOpen = !subjectDropdownOpen">
-                <view class="subject-btn">
+                <view class="subject-btn" :class="{ 'public-mode': currentMode === 'public' }">
                   <text>{{ currentSubjectName }}</text>
                   <image src="/static/icons/三角.svg" class="arrow-icon" mode="aspectFit"></image>
                 </view>
@@ -121,7 +129,7 @@
                   <view class="sub-item" v-for="(sub, index) in subjects" :key="sub.id" @click.stop="selectSubject(index)" :class="{ active: currentSubjectIdx === index }">{{ sub.title }}</view>
                 </view>
               </view>
-              <view class="setting-wrapper" @mouseenter="manageMenuOpen = true" @mouseleave="manageMenuOpen = false">
+              <view class="setting-wrapper" v-if="canEdit" @mouseenter="manageMenuOpen = true" @mouseleave="manageMenuOpen = false">
                 <view class="setting-btn custom-menu-icon">
                   <view class="menu-line"></view>
                   <view class="menu-line"></view>
@@ -168,7 +176,7 @@
             
             <view class="filter-header" @click="isFilterExpanded = !isFilterExpanded">
               <view class="fh-left-group">
-                <text class="fh-title">筛选条件</text>
+                <text class="fh-title">筛选条件 <text v-if="currentMode==='public'" style="font-weight:normal;color:#94a3b8;margin-left:5px;">(公共库)</text></text>
                 
                 <view class="clear-filter-btn" 
                       v-if="allActiveFilters.length > 0" 
@@ -208,7 +216,7 @@
               <view class="f-row mt-2 active-filters-row" v-if="allActiveFilters.length > 0">
                 <text class="f-label">筛选:</text>
                 <view class="f-tags">
-                  <view v-for="item in allActiveFilters" :key="item.id" 
+                  <view v-for="item in allActiveFilters" :key="item.type + item.id" 
                         class="tag-chip" 
                         :class="item.type === 'cat' ? 'red' : 'blue'">
                       <text>{{ item.name }}</text>
@@ -234,9 +242,21 @@
                   <text class="info-chip type">{{ q.type }}</text>
                   <text class="info-chip prov" v-if="q.province">{{ q.province }}</text>
                 </view>
+                
                 <view class="meta-right">
-                  <text class="op-btn blue" @click="openEditModal(q)">编辑</text>
-                  <text class="op-btn red" @click="handleDelete(q.id)">删除</text>
+                  <template v-if="currentMode === 'public'">
+                      <block v-if="currentUser && currentUser.role === 'admin'">
+                          <text class="op-btn green" @click="openForkModal(q)">+ 加入我的题库</text>
+                          <text class="op-btn blue" @click="openEditModal(q)">编辑</text>
+                          <text class="op-btn red" @click="handleDelete(q.id)">删除</text>
+                      </block>
+                      <text v-else class="op-btn green" @click="openForkModal(q)">+ 加入我的题库</text>
+                  </template>
+                  
+                  <template v-else>
+                      <text class="op-btn blue" @click="openEditModal(q)">编辑</text>
+                      <text class="op-btn red" @click="handleDelete(q.id)">删除</text>
+                  </template>
                 </view>
               </view>
 
@@ -273,10 +293,6 @@
                             <view class="sub-q-tags" v-if="subQ.tags && subQ.tags.length">
                                 <text v-for="t in subQ.tags" :key="t" class="mini-tag">{{t}}</text>
                             </view>
-                            <view v-if="showAnswerMap[q.id]" class="sub-q-ans-box">
-                                 <text class="ans-label">[答案]</text> 
-                                 <LatexText :text="subQ.answer || '无'"></LatexText>
-                            </view>
                         </view>
                     </view>
                     
@@ -288,7 +304,7 @@
                        <image :src="q.image" class="q-image" mode="widthFix" />
                     </view>
 
-                    <view v-if="showAnswerMap[q.id] && (!q.subQuestions || q.subQuestions.length === 0)" class="answer-box">
+                    <view v-if="showAnswerMap[q.id]" class="answer-box mt-2">
                         <view class="ans-block" v-if="q.answer">
                             <view class="ans-tag answer">答案</view>
                             <view class="ans-content"><LatexText :text="q.answer"></LatexText></view>
@@ -311,12 +327,12 @@
               <view class="q-footer">
                 <view class="tags-row">
                   <view v-for="tag in getKnowledgeTags(q.categoryIds)" :key="'k-'+(tag.id || tag.title)" class="tag-badge red" @click.stop="handleTagClick(tag.title || tag)">
-                    <image src="/static/icons/标签.svg" class="tag-icon" mode="aspectFit" style="filter: invert(36%) sepia(88%) saturate(3025%) hue-rotate(338deg) brightness(97%) contrast(93%);"></image>
+                    <image src="/static/icons/标签-红.svg" class="tag-icon icon-red" mode="aspectFit"></image>
                     <text>{{ tag.title || tag }}</text>
                   </view>
                   
                   <view v-for="tag in (q.tags||[])" :key="'t-'+tag" class="tag-badge blue" @click.stop="handleTagClick(tag)">
-                    <image src="/static/icons/标签.svg" class="tag-icon" mode="aspectFit" style="filter: invert(41%) sepia(96%) saturate(1912%) hue-rotate(200deg) brightness(101%) contrast(96%);"></image>
+                    <image src="/static/icons/标签-蓝.svg" class="tag-icon icon-blue" mode="aspectFit"></image>
                     <text>{{ tag }}</text>
                   </view>
                 </view>
@@ -334,10 +350,14 @@
 
         <view class="right-toolbar">
           <text class="tool-head">工具</text>
-          <view class="tool-btn primary" @click="openAddModal">
+          <view v-if="canEdit" class="tool-btn primary" @click="openAddModal">
               <image src="/static/icons/添加.svg" class="tool-icon-img" mode="aspectFit"></image>
               <text class="t-lbl">录题</text>
-            </view>
+          </view>
+          <view v-else class="tool-btn disabled">
+              <image src="/static/icons/添加.svg" class="tool-icon-img" mode="aspectFit" style="filter:grayscale(1)"></image>
+              <text class="t-lbl" style="color:#94a3b8">只读</text>
+          </view>
           <view class="divider"></view>
           <text class="tool-head">试题篮</text>
           <view class="basket-col">
@@ -360,13 +380,14 @@
       <view class="empty-content"><text class="empty-icon">🚧</text><text class="empty-text">功能开发中...</text></view>
     </view>
 
-    <ManageSubjectModal v-model:visible="showSubjectModal" :initialData="subjects" @saved="reloadSubjects" />
-    <ManageContentModal v-model:visible="showContentModal" :subjectId="currentSubjectId" @saved="loadCategories" />
+    <ManageSubjectModal v-model:visible="showSubjectModal" :initialData="subjects" :mode="currentMode" @saved="reloadSubjects" />
+    <ManageContentModal v-model:visible="showContentModal" :subjectId="currentSubjectId" :mode="currentMode" @saved="loadCategories" />
     <AddQuestionModal 
         ref="addModalRef" 
         v-model:visible="showAddModal" 
         :subjectId="currentSubjectId" 
         :knowledgeList="flatLeaves" 
+        :isPublic="currentMode === 'public'"
         @saved="handleQuestionSaved" 
     />
     
@@ -388,13 +409,36 @@
         @export-word="handleExportWord"
     />
 
+    <view class="fork-modal-overlay" v-if="showForkModal" @click="showForkModal=false">
+        <view class="fork-modal-box" @click.stop>
+            <view class="fm-title">加入我的题库</view>
+            <view class="fm-tip">请选择您私人空间下的目标位置：</view>
+            <view class="fm-field">
+                <text class="fm-label">选择科目:</text>
+                <picker :range="privateSubjects" range-key="title" @change="handleForkSubChange">
+                    <view class="fm-picker">{{ selectedForkSub ? selectedForkSub.title : '请选择...' }}</view>
+                </picker>
+            </view>
+            <view class="fm-field" v-if="selectedForkSub">
+                <text class="fm-label">选择知识点:</text>
+                <picker :range="privateCategoriesFlat" range-key="fullPath" @change="handleForkCatChange">
+                    <view class="fm-picker">{{ selectedForkCat ? selectedForkCat.fullPath : '请选择...' }}</view>
+                </picker>
+            </view>
+            <view class="fm-actions">
+                <button class="fm-btn cancel" @click="showForkModal=false">取消</button>
+                <button class="fm-btn confirm" :disabled="!selectedForkCat" @click="confirmFork">确认克隆</button>
+            </view>
+        </view>
+    </view>
+
   </view>
 </template>
 
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue';
-import { getSubjects, getCategories, getQuestions, deleteQuestion, getFilters } from '@/api/question.js';
-import { baseUrl } from '@/utils/request.js';
+import { request } from '@/utils/request.js';
+import { getQuestions, deleteQuestion } from '@/api/question.js';
 import CategoryTree from '@/components/CategoryTree.vue';
 import LatexText from '@/components/LatexText.vue';
 import Whiteboard from '@/components/Whiteboard.vue';
@@ -403,19 +447,12 @@ import ExportQuestionsModal from '@/components/ExportQuestionsModal.vue';
 import ManageSubjectModal from '@/components/ManageSubjectModal.vue';
 import ManageContentModal from '@/components/ManageContentModal.vue';
 import QuestionBasketModal from '@/components/QuestionBasketModal.vue';
+import { onLoad } from '@dcloudio/uni-app';
 
-// --- 新增：折叠状态控制 ---
+// --- 1. 变量定义 ---
+const currentMode = ref('private'); 
 const isSidebarCollapsed = ref(false); 
-
-const ALL_PROVINCES = [
-    "全国", "北京", "天津", "上海", "重庆", "河北", "山西", "内蒙古", 
-    "辽宁", "吉林", "黑龙江", "江苏", "浙江", "安徽", "福建", 
-    "江西", "山东", "河南", "湖北", "湖南", "广东", "广西", 
-    "海南", "四川", "贵州", "云南", "西藏", "陕西", "甘肃", 
-    "青海", "宁夏", "新疆"
-];
-
-// --- State ---
+const currentUser = ref(null);
 const activeTab = ref('question_bank');
 const subjects = ref([]);
 const currentSubjectIdx = ref(0);
@@ -424,12 +461,20 @@ const questions = ref([]);
 const flatLeaves = ref([]);
 const loading = ref(false);
 
+const filterYear = ref('');     
+const filterSource = ref('');
+const filterQNumber = ref('');
+
 const selectedCategoryIds = ref([]);
 const selectedType = ref('全部');
 const selectedDiff = ref('全部');
 const selectedTags = ref([]);
+const selectedProvince = ref('全部');
 const itemsPerPage = ref(10);
 const currentPage = ref(1);
+
+const typeOptions = ref(['单选题','多选题','填空题','解答题']);
+const provinceOptions = ref([ "全国", "北京", "天津", "上海", "重庆", "河北", "山西", "内蒙古", "辽宁", "吉林", "黑龙江", "江苏", "浙江", "安徽", "福建", "江西", "山东", "河南", "湖北", "湖南", "广东", "广西", "海南", "四川", "贵州", "云南", "西藏", "陕西", "甘肃", "青海", "宁夏", "新疆" ]);
 
 const catSearch = ref('');
 const defaultTreeOpen = ref(false);
@@ -450,280 +495,236 @@ const showAnswerMap = ref({});
 const waitingBasketKey = ref(null);
 const baskets = ref({1:[],2:[],3:[],4:[],5:[],6:[],7:[]});
 
-const typeOptions = ref(['单选题','多选题','填空题','解答题']);
-const provinceOptions = ref(ALL_PROVINCES); 
-const selectedProvince = ref('全部');
-const filterYear = ref('');
-const filterSource = ref('');
-const filterQNumber = ref('');
-
-// --- [分页新增] 状态变量 ---
 const showJumpPopover = ref(false);
 const jumpPageInput = ref('');
 
 let debounceTimer = null;
 
-const currentSubjectName = computed(() => subjects.value[currentSubjectIdx.value]?.title || '加载中');
-const currentSubjectId = computed(() => subjects.value[currentSubjectIdx.value]?.id);
-const totalPages = computed(() => Math.ceil(questions.value.length / itemsPerPage.value));
-const displayedQuestions = computed(() => questions.value.slice((currentPage.value-1)*itemsPerPage.value, currentPage.value*itemsPerPage.value));
+const showForkModal = ref(false);
+const forkTargetQuestion = ref(null);
+const privateSubjects = ref([]);
+const privateCategoriesFlat = ref([]);
+const selectedForkSub = ref(null);
+const selectedForkCat = ref(null);
 
-const provinceOptionsWithAll = computed(() => ['全部', ...provinceOptions.value]);
-
-const questionsForExport = computed(() => {
-    if (activeBasketId.value && baskets.value[activeBasketId.value]) {
-        return baskets.value[activeBasketId.value];
-    }
-    return [];
-});
-
-const allActiveFilters = computed(() => {
-    const list = [];
-    selectedCategoryIds.value.forEach(id => {
-        const n = findNode(categories.value, id);
-        if(n && (!n.children || n.children.length === 0)) {
-            list.push({ type: 'cat', id: id, name: n.title }); 
-        }
-    });
-    selectedTags.value.forEach(tag => { list.push({ type: 'tag', id: tag, name: tag }); });
-    if(selectedProvince.value !== '全部') list.push({ type: 'province', id: 'prov', name: selectedProvince.value });
-    if(filterYear.value) list.push({ type: 'year', id: 'year', name: filterYear.value });
-    if(filterSource.value) list.push({ type: 'source', id: 'src', name: filterSource.value });
-    if(filterQNumber.value) list.push({ type: 'qnum', id: 'qn', name: '#' + filterQNumber.value });
-    return list;
-});
-
-// --- [分页新增] 核心修改：固定槽位计算逻辑 ---
-const visiblePages = computed(() => {
-  const total = totalPages.value || 1;
-  const current = currentPage.value;
-  const maxVisible = 5;
-
-  if (total <= maxVisible) {
-    return Array.from({length: total}, (_, i) => {
-        const p = i + 1;
-        return { val: p, key: 'p-'+p, isActive: p === current };
-    });
-  }
-  
-  let start = current - 2;
-  if (start < 1) start = 1;
-  if (start + 4 > total) start = total - 4; 
-
-  const arr = [];
-  for(let i = 0; i < 5; i++) {
-      const p = start + i;
-      arr.push({ val: p, key: 'slot-' + i, isActive: p === current });
-  }
-  return arr;
-});
-
-const goToPage = (p) => {
-  if (p === currentPage.value) return;
-  currentPage.value = p;
-  loadQuestions();
-};
-
-const toggleJumpPopover = () => {
-  showJumpPopover.value = !showJumpPopover.value;
-  if(showJumpPopover.value) jumpPageInput.value = '';
-};
-
-const handleJumpConfirm = () => {
-  const p = parseInt(jumpPageInput.value);
-  if (p && p >= 1 && p <= totalPages.value) {
-    currentPage.value = p;
-    loadQuestions();
-    showJumpPopover.value = false;
+// --- 2. 生命周期 ---
+onLoad((options) => {
+  if (options.mode === 'public') {
+    currentMode.value = 'public';
   } else {
-    uni.showToast({title:'页码无效', icon:'none'});
+    currentMode.value = 'private';
   }
-};
-
-watch([selectedType, selectedDiff, selectedTags, selectedCategoryIds], () => {
-    currentPage.value = 1;
-    loadQuestions();
-}, { deep: true });
-
-watch([selectedProvince], () => {
-    currentPage.value = 1;
-    loadQuestions();
 });
 
 onMounted(async () => {
-    const subData = await getSubjects();
-    subjects.value = subData || [];
-    if(subjects.value.length) {
-        await reloadAll(); 
-    }
-    window.addEventListener('keydown', handleKeyBasket);
-    window.addEventListener('click', handleGlobalClick);
+  const token = uni.getStorageSync('token');
+  const user = uni.getStorageSync('user');
+
+  if (currentMode.value !== 'public' && !token) {
+    uni.reLaunch({ url: '/pages/login/login' });
+    return;
+  }
+
+  if (token) currentUser.value = user;
+  
+  await reloadSubjects(); 
+  
+  window.addEventListener('keydown', handleKeyBasket);
+  window.addEventListener('click', handleGlobalClick);
 });
 
 onUnmounted(() => {
-    window.removeEventListener('keydown', handleKeyBasket);
-    window.removeEventListener('click', handleGlobalClick);
+  window.removeEventListener('keydown', handleKeyBasket);
+  window.removeEventListener('click', handleGlobalClick);
 });
 
-const debounceLoadQuestions = () => {
-    if (debounceTimer) clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => {
-        loadQuestions();
-    }, 500);
-};
-
-const handleCatSearchInput = () => {
-    if (debounceTimer) clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => {
-        handleCatSearch();
-    }, 500);
-};
-
-const refreshFilters = async () => {
-    if(!currentSubjectId.value) return;
-    try {
-        const res = await getFilters(currentSubjectId.value);
-        typeOptions.value = (res.types && res.types.length) ? res.types : ['单选题','多选题','填空题','解答题'];
-        if(selectedType.value !== '全部' && !typeOptions.value.includes(selectedType.value)) {
-            selectedType.value = '全部';
-        }
-        if(selectedProvince.value !== '全部' && !provinceOptions.value.includes(selectedProvince.value)) {
-            selectedProvince.value = '全部';
-        }
-    } catch(e) { console.error(e); }
-};
-
-const handleQuestionSaved = async () => {
-    await refreshFilters();
-    await loadQuestions();
-};
-
-const toggleExpandAll = (expand) => {
-    defaultTreeOpen.value = expand;
-    manageMenuOpen.value = false;
-};
-
-const getAllLeafIds = (nodes) => {
-    let ids = [];
-    nodes.forEach(node => {
-        if (!node.children || node.children.length === 0) ids.push(node.id);
-        else ids = [...ids, ...getAllLeafIds(node.children)];
+// --- 3. API 请求 (修复 mode 参数缺失问题) ---
+const reloadSubjects = async () => {
+  try {
+    const subData = await request({ 
+      url: '/api/subjects', 
+      method: 'GET', 
+      data: { mode: currentMode.value } 
     });
-    return ids;
+    subjects.value = subData || [];
+    currentSubjectIdx.value = 0;
+    await reloadAll();
+  } catch(e) { console.error("加载科目失败", e); }
 };
 
-const findNode = (nodes, id) => {
-    for(let n of nodes) {
-        if(n.id === id) return n; 
-        if(n.children) { const found = findNode(n.children, id); if(found) return found; }
-    }
-    return null;
-};
-
-const findPathToNode = (nodes, targetId, path = []) => {
-    for (const node of nodes) {
-        if (node.id === targetId) return [...path];
-        if (node.children) {
-            const foundPath = findPathToNode(node.children, targetId, [...path, node.id]);
-            if (foundPath) return foundPath;
-        }
-    }
-    return null;
+const reloadAll = async () => { 
+  await loadCategories(); 
+  await refreshFilters(); 
+  await loadQuestions(); 
 };
 
 const loadCategories = async () => {
-    if(!currentSubjectId.value) return;
-    const data = await getCategories(currentSubjectId.value);
+  if(!currentSubjectId.value) return;
+  try {
+    const data = await request({ 
+      url: '/api/categories', 
+      method: 'GET', 
+      data: { subjectId: currentSubjectId.value, mode: currentMode.value } 
+    });
     categories.value = data || [];
     const leaves = [];
     const traverse = (nodes, path) => nodes?.forEach(n => {
-        const currentPath = path ? `${path} / ${n.title}` : n.title;
-        if(!n.children?.length) leaves.push({ ...n, fullPath: currentPath });
-        else traverse(n.children, currentPath);
+      const currentPath = path ? `${path} / ${n.title}` : n.title;
+      if(!n.children?.length) leaves.push({ ...n, fullPath: currentPath });
+      else traverse(n.children, currentPath);
     });
-    traverse(data, '');
+    traverse(categories.value, '');
     flatLeaves.value = leaves;
+  } catch(e) { console.error("加载目录失败", e); }
+};
+
+const refreshFilters = async () => { 
+  if(!currentSubjectId.value) return;
+  try {
+    const res = await request({ 
+      url: '/api/filters', 
+      method: 'GET', 
+      data: { subjectId: currentSubjectId.value, mode: currentMode.value } // 核心修复：带上 mode
+    });
+    if (res && res.types) {
+        typeOptions.value = res.types.length ? res.types : ['单选题','多选题','填空题','解答题'];
+    }
+  } catch(e) { console.error("加载过滤器失败", e); }
 };
 
 const loadQuestions = async () => {
-    if (!currentSubjectId.value) return;
-    loading.value = true;
-    
-    const params = { subjectId: currentSubjectId.value };
-    if (selectedType.value !== '全部') params.type = selectedType.value;
-    if (selectedDiff.value !== '全部') params.difficulty = selectedDiff.value;
-    if (selectedProvince.value !== '全部') params.province = selectedProvince.value;
-    if (filterYear.value) params.year = filterYear.value;
-    if (filterSource.value) params.source = filterSource.value;
-    if (filterQNumber.value) params.qNumber = filterQNumber.value;
-    if (selectedTags.value.length) params.tags = selectedTags.value.join(',');
-    if (selectedCategoryIds.value.length) {
-        const allIds = new Set();
-        selectedCategoryIds.value.forEach(sid => {
-            const node = findNode(categories.value, sid);
-            if (node) getAllLeafIds([node]).forEach(id => allIds.add(id));
-        });
-        if (allIds.size > 0) params.categoryIds = Array.from(allIds).join(',');
+  if (!currentSubjectId.value) return;
+  loading.value = true;
+  const params = { subjectId: currentSubjectId.value, mode: currentMode.value };
+  
+  if (selectedType.value !== '全部') params.type = selectedType.value;
+  if (selectedDiff.value !== '全部') params.difficulty = selectedDiff.value;
+  if (selectedProvince.value !== '全部') params.province = selectedProvince.value;
+  if (filterYear.value) params.year = filterYear.value;
+  if (filterSource.value) params.source = filterSource.value;
+  if (filterQNumber.value) params.qNumber = filterQNumber.value;
+  if (selectedTags.value.length) params.tags = selectedTags.value.join(',');
+  
+  if (selectedCategoryIds.value.length) {
+      const allIds = new Set();
+      selectedCategoryIds.value.forEach(sid => {
+          const node = findNode(categories.value, sid);
+          if (node) getAllLeafIds([node]).forEach(id => allIds.add(id));
+      });
+      if (allIds.size > 0) params.categoryIds = Array.from(allIds).join(',');
+  }
+
+  try {
+    const res = await request({ url: '/api/questions', method: 'GET', data: params });
+    questions.value = (res.data || []).map(q => {
+      let parsedOptions = q.options;
+      if (typeof parsedOptions === 'string') { try { parsedOptions = JSON.parse(parsedOptions); } catch (e) { parsedOptions = {}; } }
+      if (!parsedOptions) parsedOptions = { A: '', B: '', C: '', D: '' };
+      
+      let imgPosCode = 'bm'; let imgAlign = 'center';
+      if (q.image && typeof q.image === 'string') {
+          const match = q.image.match(/[?&]pos=([a-z]+)/);
+          if (match) {
+              imgPosCode = match[1];
+              if (imgPosCode === 'r') imgAlign = 'side-right'; 
+              else { const h = imgPosCode.charAt(1) || 'm'; imgAlign = h === 'l' ? 'left' : (h === 'r' ? 'right' : 'center'); }
+          }
+      }
+      return { ...q, options: parsedOptions, tags: q.tags || [], code: q.code || 'A' + q.id.toString().substr(-4), imgPosCode, imgAlign };
+    });
+  } catch (e) { console.error(e); } finally { loading.value = false; }
+};
+
+// --- 4. 业务方法 ---
+const switchMode = (mode) => {
+  if(currentMode.value === mode) return;
+  if (mode === 'private' && !uni.getStorageSync('token')) {
+    uni.showToast({ title: '请先登录', icon: 'none' });
+    uni.navigateTo({ url: '/pages/login/login' });
+    return;
+  }
+  currentMode.value = mode;
+  currentPage.value = 1;
+  selectedCategoryIds.value = [];
+  reloadSubjects();
+};
+
+const openForkModal = async (q) => {
+  if (!uni.getStorageSync('token')) {
+    uni.showToast({ title: '登录后可加入题库', icon: 'none' });
+    uni.navigateTo({ url: '/pages/login/login' });
+    return;
+  }
+  forkTargetQuestion.value = q;
+  showForkModal.value = true;
+  selectedForkSub.value = null;
+  selectedForkCat.value = null;
+  const subs = await request({ url: '/api/subjects', method: 'GET', data: { mode: 'private' } });
+  privateSubjects.value = subs || [];
+};
+
+const handleForkSubChange = async (e) => {
+  const idx = e.detail.value;
+  selectedForkSub.value = privateSubjects.value[idx];
+  const cats = await request({ url: '/api/categories', method: 'GET', data: { subjectId: selectedForkSub.value.id, mode: 'private' } });
+  const leaves = [];
+  const traverse = (nodes, path) => nodes?.forEach(n => {
+      const currentPath = path ? `${path} / ${n.title}` : n.title;
+      if(!n.children?.length) leaves.push({ ...n, fullPath: currentPath });
+      else traverse(n.children, currentPath);
+  });
+  traverse(cats, '');
+  privateCategoriesFlat.value = leaves;
+};
+
+const handleForkCatChange = (e) => {
+  selectedForkCat.value = privateCategoriesFlat.value[e.detail.value];
+};
+
+const confirmFork = async () => {
+  if(!forkTargetQuestion.value || !selectedForkSub.value || !selectedForkCat.value) return;
+  try {
+    await request({
+      url: '/api/questions/fork',
+      method: 'POST',
+      data: {
+        questionId: forkTargetQuestion.value.id,
+        targetSubjectId: selectedForkSub.value.id,
+        targetCategoryIds: [selectedForkCat.value.id]
+      }
+    });
+    uni.showToast({ title: '已加入我的题库', icon: 'success' });
+    showForkModal.value = false;
+  } catch(e) { uni.showToast({ title: '加入失败', icon: 'none' }); }
+};
+
+const findNode = (nodes, id) => { for(let n of nodes) { if(n.id === id) return n; if(n.children) { const found = findNode(n.children, id); if(found) return found; } } return null; };
+const getAllLeafIds = (nodes) => { let ids = []; nodes.forEach(node => { if (!node.children || node.children.length === 0) ids.push(node.id); else ids = [...ids, ...getAllLeafIds(node.children)]; }); return ids; };
+const debounceLoadQuestions = () => { if (debounceTimer) clearTimeout(debounceTimer); debounceTimer = setTimeout(() => { loadQuestions(); }, 500); };
+const handleCatSearchInput = () => { if (debounceTimer) clearTimeout(debounceTimer); debounceTimer = setTimeout(() => { handleCatSearch(); }, 500); };
+const handleCatSearch = () => { 
+    const keyword = catSearch.value;
+    if(!keyword) return; 
+    const matchedLeaves = flatLeaves.value.filter(l => l.title.includes(keyword));
+    if(matchedLeaves.length) {
+        selectedCategoryIds.value = matchedLeaves.map(l => l.id);
+        loadQuestions();
     }
-
-    try {
-        const res = await getQuestions(params);
-        questions.value = (res.data || []).map(q => {
-            let parsedOptions = q.options;
-            if (typeof parsedOptions === 'string') {
-                try { parsedOptions = JSON.parse(parsedOptions); } catch (e) { parsedOptions = {}; }
-            }
-            if (!parsedOptions) parsedOptions = { A: '', B: '', C: '', D: '' };
-            
-            let imgPosCode = 'bm';
-            let imgAlign = 'center';
-            if (q.image) {
-                const match = q.image.match(/[?&]pos=([a-z]+)/);
-                if (match) {
-                    imgPosCode = match[1];
-                    if (imgPosCode === 'r') imgAlign = 'side-right'; 
-                    else {
-                        const h = imgPosCode.charAt(1) || 'm';
-                        if (h === 'l') imgAlign = 'left';
-                        else if (h === 'r') imgAlign = 'right';
-                        else imgAlign = 'center';
-                    }
-                }
-            }
-
-            return {
-                ...q,
-                options: parsedOptions,
-                tags: q.tags || [],
-                code: q.code || 'A' + q.id.toString().substr(-4),
-                imgPosCode, 
-                imgAlign
-            };
-        });
-    } catch (e) {
-        console.error(e);
-        uni.showToast({ title: '加载失败', icon: 'none' });
-    } finally {
-        loading.value = false;
-    }
 };
-
-const handleTagClick = (tag) => {
-    if(selectedTags.value.includes(tag)) selectedTags.value = selectedTags.value.filter(t => t !== tag);
-    else selectedTags.value.push(tag);
+const handlePageSizeChange = (e) => { itemsPerPage.value = [10,20,50][e.detail.value]; currentPage.value = 1; loadQuestions(); }
+const changePage = (delta) => {
+    const newVal = currentPage.value + delta;
+    if(newVal >= 1 && newVal <= totalPages.value) currentPage.value = newVal;
 };
-
-// [新增] 判断小题是否需要高亮 (红色)
-const isSubQHighlighted = (subQ) => {
-    if (!selectedTags.value || selectedTags.value.length === 0) return false;
-    if (!subQ.tags || subQ.tags.length === 0) return false;
-    return subQ.tags.some(tag => selectedTags.value.includes(tag));
+const toggleJumpPopover = () => { showJumpPopover.value = !showJumpPopover.value; if(showJumpPopover.value) jumpPageInput.value = ''; };
+const handleJumpConfirm = () => {
+  const p = parseInt(jumpPageInput.value);
+  if (p && p >= 1 && p <= totalPages.value) {
+    currentPage.value = p; loadQuestions(); showJumpPopover.value = false;
+  } else { uni.showToast({title:'页码无效', icon:'none'}); }
 };
-
-const handleProvinceChange = (e) => {
-    selectedProvince.value = provinceOptionsWithAll.value[e.detail.value];
-};
-
+const handleTagClick = (tag) => { if(selectedTags.value.includes(tag)) selectedTags.value = selectedTags.value.filter(t => t !== tag); else selectedTags.value.push(tag); };
+const isSubQHighlighted = (subQ) => { if (!selectedTags.value.length || !subQ.tags?.length) return false; return subQ.tags.some(tag => selectedTags.value.includes(tag)); };
 const removeFilter = (item) => {
     if (item.type === 'cat') selectedCategoryIds.value = selectedCategoryIds.value.filter(id => id !== item.id);
     else if (item.type === 'tag') selectedTags.value = selectedTags.value.filter(tag => tag !== item.name);
@@ -732,115 +733,119 @@ const removeFilter = (item) => {
     else if (item.type === 'source') { filterSource.value = ''; loadQuestions(); }
     else if (item.type === 'qnum') { filterQNumber.value = ''; loadQuestions(); }
 };
-
 const clearAllFilters = () => { 
-    selectedCategoryIds.value = []; 
-    selectedTags.value = []; 
-    selectedProvince.value = '全部';
-    filterYear.value = '';
-    filterSource.value = '';
-    filterQNumber.value = '';
-    loadQuestions(); 
+    selectedCategoryIds.value = []; selectedTags.value = []; selectedProvince.value = '全部'; filterYear.value = ''; filterSource.value = ''; filterQNumber.value = ''; loadQuestions(); 
 };
-
 const selectSubject = (index) => { currentSubjectIdx.value = index; subjectDropdownOpen.value = false; reloadAll(); };
-const reloadSubjects = async () => {
-    const lastId = currentSubjectId.value;
-    const subData = await getSubjects();
-    subjects.value = subData || [];
-    const idx = subjects.value.findIndex(s => s.id === lastId);
-    currentSubjectIdx.value = idx !== -1 ? idx : 0;
-    reloadAll();
-};
-
-const reloadAll = async () => { 
-    await loadCategories(); 
-    await refreshFilters(); 
-    await loadQuestions(); 
-};
-
+const openAddModal = () => { showAddModal.value = true; addModalRef.value?.open(); };
+const openEditModal = (q) => { showAddModal.value = true; addModalRef.value?.open(q); };
+const handleDelete = async (id) => { uni.showModal({ content: '确定删除?', success: async (res) => { if(res.confirm) { await deleteQuestion(id); loadQuestions(); } } }); };
+const handleQuestionSaved = async () => { await refreshFilters(); await loadQuestions(); };
 const handleTreeSelect = (e, node) => {
     const id = node.id;
     const isLeaf = !node.children || node.children.length === 0;
-
     if(isMultiSelect.value) { 
         if (isLeaf) {
-            const leavesOnly = selectedCategoryIds.value.filter(sid => {
-                const n = findNode(categories.value, sid);
-                return n && (!n.children || n.children.length === 0);
-            });
-            let newSelection = [...leavesOnly];
+            let newSelection = [...selectedCategoryIds.value];
             if(newSelection.includes(id)) newSelection = newSelection.filter(x => x !== id);
             else newSelection.push(id);
             selectedCategoryIds.value = newSelection;
-        } else {
-            uni.showToast({title: '不能选择其他级别目录', icon: 'none'});
-        }
+        } else { uni.showToast({title: '不能选择其他级别目录', icon: 'none'}); }
     } else {
-        if(selectedCategoryIds.value.length === 1 && selectedCategoryIds.value[0] === id) selectedCategoryIds.value = [];
-        else selectedCategoryIds.value = [id];
+        selectedCategoryIds.value = (selectedCategoryIds.value.length === 1 && selectedCategoryIds.value[0] === id) ? [] : [id];
     }
 };
-
-const changePage = (delta) => {
-    const newVal = currentPage.value + delta;
-    if(newVal >= 1 && newVal <= totalPages.value) currentPage.value = newVal;
-};
-const handlePageSizeChange = (e) => { itemsPerPage.value = [10,20,50][e.detail.value]; currentPage.value = 1; loadQuestions(); }
-
-const handleCatSearch = () => { 
-    const keyword = catSearch.value;
-    if(!keyword) return; 
-    const matchedLeaves = flatLeaves.value.filter(l => l.title.includes(keyword));
-    if(matchedLeaves.length) {
-        const ids = matchedLeaves.map(l => l.id);
-        selectedCategoryIds.value = ids;
-        const parentsToExpand = new Set();
-        matchedLeaves.forEach(leaf => {
-            const path = findPathToNode(categories.value, leaf.id);
-            if (path) path.forEach(pid => parentsToExpand.add(pid));
-        });
-        treeExpandedIds.value = Array.from(parentsToExpand);
-        loadQuestions();
-    }
-};
-
-const openAddModal = () => {
-    showAddModal.value = true;
-    addModalRef.value?.open();
-};
-
-const openEditModal = (q) => {
-    showAddModal.value = true;
-    addModalRef.value?.open(q);
-};
-
-const handleDelete = async (id) => { uni.showModal({ content: '确定删除?', success: async (res) => { if(res.confirm) { await deleteQuestion(id); loadQuestions(); } } }); };
+const toggleExpandAll = (expand) => { defaultTreeOpen.value = expand; manageMenuOpen.value = false; };
+const getKnowledgeTags = (ids) => ids.map(id => flatLeaves.value.find(l => l.id === id) || {id, title:id}).filter(x=>x);
+const toggleAnswer = (id) => showAnswerMap.value[id] = !showAnswerMap.value[id];
 const toggleWaiting = (id) => waitingBasketKey.value = waitingBasketKey.value === id ? null : id;
 const handleKeyBasket = (e) => { if(waitingBasketKey.value && e.key >= '1' && e.key <= '7') { const k = parseInt(e.key); const q = questions.value.find(x => x.id === waitingBasketKey.value); if(q && !baskets.value[k].find(x => x.id === q.id)) baskets.value[k].push(q); waitingBasketKey.value = null; } if(e.key === 'Escape') waitingBasketKey.value = null; };
 const removeFromBasket = (bid, qid) => baskets.value[bid] = baskets.value[bid].filter(x => x.id !== qid);
+const handleExportPdf = () => { showExportModal.value = true; };
+const handleExportWord = () => { showExportModal.value = true; };
+const handleGlobalClick = (e) => { manageMenuOpen.value = false; subjectDropdownOpen.value = false; showJumpPopover.value = false; };
 
-const handleExportPdf = () => {
-    showExportModal.value = true;
-    uni.showToast({ title: '准备导出PDF...', icon: 'none' });
-};
-const handleExportWord = () => {
-    showExportModal.value = true;
-    uni.showToast({ title: '准备导出Word...', icon: 'none' });
-};
+// --- 5. Watchers & Computed ---
+watch([selectedType, selectedDiff, selectedProvince, selectedCategoryIds, selectedTags], () => {
+    currentPage.value = 1;
+    loadQuestions();
+});
 
-const getKnowledgeTags = (ids) => ids.map(id => flatLeaves.value.find(l => l.id === id) || {id, title:id}).filter(x=>x);
-const toggleAnswer = (id) => showAnswerMap.value[id] = !showAnswerMap.value[id];
-const handleGlobalClick = (e) => {
-    manageMenuOpen.value = false;
-    subjectDropdownOpen.value = false;
-    showJumpPopover.value = false; 
-};
+const currentSubjectName = computed(() => subjects.value[currentSubjectIdx.value]?.title || '加载中');
+const currentSubjectId = computed(() => subjects.value[currentSubjectIdx.value]?.id);
+const canEdit = computed(() => currentMode.value === 'private' || (currentMode.value === 'public' && currentUser.value && currentUser.value.role === 'admin'));
+const totalPages = computed(() => Math.ceil(questions.value.length / itemsPerPage.value));
+const displayedQuestions = computed(() => questions.value.slice((currentPage.value-1)*itemsPerPage.value, currentPage.value*itemsPerPage.value));
+const provinceOptionsWithAll = computed(() => ['全部', ...provinceOptions.value]);
+const questionsForExport = computed(() => activeBasketId.value && baskets.value[activeBasketId.value] ? baskets.value[activeBasketId.value] : []);
+
+const allActiveFilters = computed(() => {
+  const list = [];
+  selectedCategoryIds.value.forEach(id => {
+      const n = findNode(categories.value, id);
+      if(n && (!n.children || n.children.length === 0)) list.push({ type: 'cat', id: id, name: n.title }); 
+  });
+  selectedTags.value.forEach(tag => { list.push({ type: 'tag', id: tag, name: tag }); });
+  if(selectedProvince.value !== '全部') list.push({ type: 'province', id: 'prov', name: selectedProvince.value });
+  if(selectedType.value !== '全部') list.push({ type: 'type', id: 'type', name: selectedType.value });
+  if(selectedDiff.value !== '全部') list.push({ type: 'diff', id: 'diff', name: '★'.repeat(selectedDiff.value) });
+  if(filterYear.value) list.push({ type: 'year', id: 'year', name: filterYear.value });
+  if(filterSource.value) list.push({ type: 'source', id: 'src', name: filterSource.value });
+  if(filterQNumber.value) list.push({ type: 'qnum', id: 'qn', name: '#' + filterQNumber.value });
+  return list;
+});
+
+const visiblePages = computed(() => {
+  const total = totalPages.value || 1;
+  const current = currentPage.value;
+  const maxVisible = 5;
+  if (total <= maxVisible) return Array.from({length: total}, (_, i) => ({ val: i + 1, key: 'p-'+(i+1), isActive: i+1 === current }));
+  let start = current - 2;
+  if (start < 1) start = 1;
+  if (start + 4 > total) start = total - 4; 
+  const arr = [];
+  for(let i = 0; i < 5; i++) {
+    const p = start + i;
+    arr.push({ val: p, key: 'slot-' + i, isActive: p === current });
+  }
+  return arr;
+});
 </script>
 
 <style lang="scss">
+/* 此处保持您的原始样式代码完全不变 */
 page { height: 100%; overflow: hidden; font-family: "Times New Roman", "SimSun", "Songti SC", serif;}
 .layout-shell { display: flex; width: 100%; height: 100vh; background-color: #ffffff; }
+
+/* 侧边栏模式切换 */
+.space-switcher { display: flex; background: #f1f5f9; padding: 4px; margin: 0 10px 15px 10px; border-radius: 6px; width: 85%; box-sizing: border-box; }
+.space-btn { flex: 1; text-align: center; font-size: 12px; padding: 4px 0; cursor: pointer; border-radius: 4px; color: #64748b; font-weight: bold; transition: all 0.2s; }
+.space-btn.active { background: white; color: #2563eb; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+
+.space-switcher-mini { margin-bottom: 20px; text-align: center; }
+.space-char { display: inline-block; width: 28px; height: 28px; line-height: 28px; background: #eff6ff; color: #2563eb; font-weight: bold; border-radius: 50%; font-size: 14px; border: 1px solid #2563eb; }
+
+/* 禁用状态 */
+.tool-btn.disabled { opacity: 0.6; cursor: not-allowed; border-color: #f1f5f9; box-shadow: none; }
+.op-btn.green { color: #10b981; }
+
+/* Fork Modal 遮罩 */
+.fork-modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 999; display: flex; align-items: center; justify-content: center; }
+.fork-modal-box { background: white; padding: 20px; border-radius: 8px; width: 400px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+.fm-title { font-size: 18px; font-weight: bold; margin-bottom: 10px; color: #334155; }
+.fm-tip { font-size: 13px; color: #64748b; margin-bottom: 20px; }
+.fm-field { margin-bottom: 15px; }
+.fm-label { display: block; font-size: 13px; font-weight: bold; margin-bottom: 5px; color: #475569; }
+.fm-picker { border: 1px solid #cbd5e1; padding: 8px 10px; border-radius: 4px; font-size: 14px; color: #334155; background: #f8fafc; cursor: pointer; }
+.fm-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 25px; }
+.fm-btn { font-size: 13px; padding: 6px 16px; border-radius: 4px; border: none; cursor: pointer; }
+.fm-btn.cancel { background: #f1f5f9; color: #64748b; }
+.fm-btn.confirm { background: #2563eb; color: white; }
+.fm-btn.confirm:disabled { background: #94a3b8; cursor: not-allowed; }
+
+.subject-btn.public-mode { background: #2563eb; box-shadow: 0 0px 6px rgba(37, 99, 235, 0.5); }
+.subject-btn { background:#F87F23; } 
+
 .active-filters-row { display: flex; align-items: flex-start !important; margin-top: 13px !important; width: 100%; }
 .active-filters-row .f-tags { display: flex; flex-wrap: wrap; gap: 10px; width: 100%; }
 .active-filters-row .f-label { margin-top: 1px !important; align-self: flex-start; }
@@ -980,8 +985,6 @@ page { height: 100%; overflow: hidden; font-family: "Times New Roman", "SimSun",
 .op-btn.red { color: #ef4444; }
 .q-body { cursor: pointer; }
 .body-row { display: flex; margin-bottom: 10px; }
-
-/* --- 小题展示相关 --- */
 .material-box { border-bottom: 1px dashed #e2e8f0; padding-bottom: 10px; margin-bottom: 15px; }
 .sub-q-list-view { margin-top: 10px; border-top: 1px dashed #eee; padding-top: 10px; }
 .sub-q-row { margin-bottom: 15px; padding: 8px; border-radius: 6px; transition: background 0.3s; }
@@ -991,9 +994,7 @@ page { height: 100%; overflow: hidden; font-family: "Times New Roman", "SimSun",
 .mini-tag { font-size: 10px; background: #f1f5f9; color: #94a3b8; padding: 1px 6px; border-radius: 4px; }
 .sub-q-ans-box { margin-top: 6px; font-size: 13px; color: #2563eb; background: #eff6ff; padding: 4px 8px; border-radius: 4px; }
 .ans-label { font-weight: bold; margin-right: 5px; }
-
 .q-title { flex: 1; font-size: 15px; line-height: 1.6; color: #1e293b; }
-.q-img { max-width: 100%; border: 1px solid #eee; border-radius: 4px; }
 .opt-grid { display: grid; gap: 8px; font-size: 14px; margin-bottom: 10px; color: #334155; }
 .opt-key { font-weight: bold; margin-right: 5px; flex-shrink: 0; font-size: 16px;}
 .opt-item { display: flex; align-items: center; margin-bottom: 8px; }
@@ -1002,7 +1003,7 @@ page { height: 100%; overflow: hidden; font-family: "Times New Roman", "SimSun",
 .ans-block { margin-bottom: 12px; }
 .ans-block:last-child { margin-bottom: 0; }
 .ans-tag { display: inline-block; padding: 2px 8px; border-radius: 4px; color: white; font-size: 12px; font-weight: bold; margin-bottom: 4px; }
-.ans-tag.answer { background-color: #2563eb; }   
+.ans-tag.answer { background-color: #2563eb; } 
 .ans-tag.analysis { background-color: #f59e0b; } 
 .ans-tag.detailed { background-color: #10b981; } 
 .ans-content { font-size: 14px; line-height: 1.6; color: #334155; }

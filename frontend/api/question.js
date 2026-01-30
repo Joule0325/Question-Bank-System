@@ -1,7 +1,7 @@
 import { request } from '@/utils/request.js';
 
 export const getSubjects = () => { return request({ url: '/api/subjects', method: 'GET' }); };
-export const getCategories = (subjectId) => { return request({ url: '/api/categories', method: 'GET', data: { subjectId } }); };
+export const getCategories = (subjectId, mode) => { return request({ url: '/api/categories', method: 'GET', data: { subjectId, mode } }); };
 
 // [修改] 传递 subjectId 以获取特定科目的筛选条件
 export const getFilters = (subjectId) => {
