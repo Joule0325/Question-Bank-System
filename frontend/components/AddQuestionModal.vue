@@ -79,9 +79,46 @@
 
             <view class="q-body">
               <view class="content-wrapper">
-                <view class="body-row"><view class="q-title"><LatexText :text="item.title"></LatexText></view></view>
+                <view class="body-row" :class="{'material-box': item.subQuestions && item.subQuestions.length > 0}">
+                    <view class="q-title"><LatexText :text="item.title"></LatexText></view>
+                </view>
                 
-                <view v-if="item.optionRows && item.optionRows.length > 0" class="opt-container">
+                <view v-if="item.subQuestions && item.subQuestions.length > 0" class="sub-q-list">
+                    <view 
+                        v-for="(subQ, sIdx) in item.subQuestions" 
+                        :key="sIdx" 
+                        class="sub-q-item"
+                        :class="{ 'highlight-red': isSubQActive(subQ) }" 
+                    >
+                        <view class="sub-q-content"><LatexText :text="subQ.content"></LatexText></view>
+                        
+                        <view v-if="subQ.optionRows && subQ.optionRows.length > 0" class="opt-container mt-2">
+                          <view v-for="(row, rIdx) in subQ.optionRows" :key="rIdx" class="opt-row">
+                            <view v-for="opt in row" :key="opt.key" class="opt-item">
+                              <text class="opt-key">{{ opt.key }}.</text>
+                              <view class="opt-val"><LatexText :text="opt.value"></LatexText></view>
+                            </view>
+                          </view>
+                        </view>
+
+                        <view class="sub-q-tags" v-if="subQ.tags && subQ.tags.length">
+                            <text 
+                                v-for="tag in subQ.tags" 
+                                :key="tag" 
+                                class="mini-tag" 
+                                @click.stop="handlePreviewTagClick(tag)"
+                            >{{ tag }}</text>
+                        </view>
+
+                        <view v-if="item.showAnswer" class="sub-q-ans-box">
+                             <view v-if="subQ.answer" class="mb-1"><text class="ans-label">[答案] </text><LatexText :text="subQ.answer"></LatexText></view>
+                             <view v-if="subQ.analysis"><text class="ans-label">[解析] </text><LatexText :text="subQ.analysis"></LatexText></view>
+                             <view v-if="subQ.detailed"><text class="ans-label">[详解] </text><LatexText :text="subQ.detailed"></LatexText></view>
+                        </view>
+                    </view>
+                </view>
+
+                <view v-else-if="item.optionRows && item.optionRows.length > 0" class="opt-container">
                   <view v-for="(row, rIdx) in item.optionRows" :key="rIdx" class="opt-row">
                     <view v-for="opt in row" :key="opt.key" class="opt-item">
                       <text class="opt-key">{{ opt.key }}.</text>
@@ -90,7 +127,7 @@
                   </view>
                 </view>
                 
-                <view class="answer-box mt-2" v-if="item.showAnswer">
+                <view class="answer-box mt-2" v-if="item.showAnswer && (!item.subQuestions || item.subQuestions.length === 0)">
                   <view class="ans-block" v-if="item.answer">
                     <view class="ans-tag answer">答案</view>
                     <view class="ans-content"><LatexText :text="item.answer"></LatexText></view>
@@ -110,20 +147,12 @@
             <view class="q-footer">
               <view class="tags-row">
                 <view v-for="tag in getKnowledgeTags(item.categoryIds)" :key="tag.id" class="tag-badge red">
-                  <image 
-                    src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMyIgaGVpZ2h0PSIyMyIgdmlld0JveD0iMCAwIDQ4IDQ4IiBmaWxsPSJub25lIj48cGF0aCBkPSJNOCA0NEw4IDZDOCA0Ljg5NTQzIDguODk1NDMgNCAxMCA0SDM4QzM5LjEwNDYgNCA0MCA0Ljg5NTQzIDQwIDZWNDRMMjQgMzUuNzI3M0w4IDQ0WiIgZmlsbD0iI2VmNDQ0NCIgc3Ryb2tlPSIjZWY0NDQ0IiBzdHJva2Utd2lkdGg9IjMiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48cGF0aCBkPSJNMTYgMThIMzIiIHN0cm9rZT0iI0ZGRiIgc3Ryb2tlLXdpZHRoPSIzIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48L3N2Zz4=" 
-                    class="tag-icon" 
-                    mode="aspectFit"
-                  ></image>
+                  <image src="/static/icons/标签.svg" class="tag-icon" mode="aspectFit" style="filter: invert(36%) sepia(88%) saturate(3025%) hue-rotate(338deg) brightness(97%) contrast(93%);"></image>
                   <text>{{ tag.title }}</text>
                 </view>
                 
                 <view v-for="tag in item.tags" :key="tag" class="tag-badge blue">
-                  <image 
-                    src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMyIgaGVpZ2h0PSIyMyIgdmlld0JveD0iMCAwIDQ4IDQ4IiBmaWxsPSJub25lIj48cGF0aCBkPSJNOCA0NEw4IDZDOCA0Ljg5NTQzIDguODk1NDMgNCAxMCA0SDM4QzM5LjEwNDYgNCA0MCA0Ljg5NTQzIDQwIDZWNDRMMjQgMzUuNzI3M0w4IDQ0WiIgZmlsbD0iIzNiODJmNiIgc3Ryb2tlPSIjM2I4MmY2IiBzdHJva2Utd2lkdGg9IjMiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48cGF0aCBkPSJNMTYgMThIMzIiIHN0cm9rZT0iI0ZGRiIgc3Ryb2tlLXdpZHRoPSIzIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz48L3N2Zz4=" 
-                    class="tag-icon" 
-                    mode="aspectFit"
-                  ></image>
+                  <image src="/static/icons/标签.svg" class="tag-icon" mode="aspectFit" style="filter: invert(41%) sepia(96%) saturate(1912%) hue-rotate(200deg) brightness(101%) contrast(96%);"></image>
                   <text>{{ tag }}</text>
                 </view>
               </view>
@@ -206,6 +235,7 @@ const props = defineProps({
 
 const emit = defineEmits(['update:visible', 'saved']);
 
+// 状态定义
 const editorRef = ref(null);
 const isEditing = ref(false);
 const editingId = ref(null);
@@ -228,6 +258,8 @@ const fullTextCache = ref('');
 const cachedPreviewList = ref([]); 
 const parseVersion = ref(0);
 
+// 高亮状态
+const activeFilterTag = ref(''); 
 let lastClickTime = 0;
 let globalShowAnswer = true;
 
@@ -279,6 +311,7 @@ const initAdd = () => {
   parseTemplate();
 };
 
+// --- [核心修复] 初始化编辑逻辑：回显并还原格式 ---
 const initEdit = (q) => {
   isEditing.value = true;
   editingId.value = q.id;
@@ -287,8 +320,20 @@ const initEdit = (q) => {
   tempUploadedImages.value = {};
   for(const k in imageSizes) delete imageSizes[k];
   
+  // 1. 定义还原函数：把 HTML 转回 [标签]
+  const restoreTags = (str) => {
+      if (!str) return '';
+      let s = str;
+      // 还原缩进
+      s = s.replace(/<div style="text-indent: 2em;">(.*?)<\/div>/g, '[缩进]$1');
+      // 还原居中
+      s = s.replace(/<div style="text-align: center; font-weight: bold;">(.*?)<\/div>/g, '[居中]$1');
+      return s;
+  };
+
   let regionStr = q.province || ''; 
 
+  // 2. 拼接文本时调用 restoreTags
   let text = `##年份 ${q.year || ''}
 ##地区 ${regionStr}
 ##来源 ${q.source || ''}
@@ -298,17 +343,35 @@ const initEdit = (q) => {
 ##知识点 ${q.categoryIds.map(id => props.knowledgeList.find(l=>l.id==id)?.title).filter(x=>x).join('/')}
 ##标签 ${(q.tags||[]).join('/')}
 ##题干 
-${q.title || ''}
+${restoreTags(q.title || '')}
 `;
   
-  if (q.type && q.type.includes('选')) {
+  // 回显小题逻辑
+  if (q.subQuestions && q.subQuestions.length > 0) {
+      q.subQuestions.forEach((sq, idx) => {
+          text += `##小题\n${restoreTags(sq.content || '')}\n`;
+          
+          if (sq.options && Object.keys(sq.options).length > 0) {
+              text += `##选项 ${sq.optionLayout || 4}\n`;
+              Object.keys(sq.options).sort().forEach(k => {
+                  text += `${k}.${sq.options[k]}\n`; // 选项内部通常不缩进，但也可用 restoreTags
+              });
+          }
+
+          if (sq.tags && sq.tags.length) text += `##小题标签 ${sq.tags.join('/')}\n`;
+          if (sq.answer) text += `##答案 ${restoreTags(sq.answer)}\n`;
+          if (sq.analysis) text += `##分析 ${restoreTags(sq.analysis)}\n`;
+          if (sq.detailed) text += `##详解 ${restoreTags(sq.detailed)}\n`;
+      });
+  } else if (q.type && q.type.includes('选')) {
       text += `##选项 ${q.optionLayout || 4}\n`; 
       if(q.options) {
         Object.keys(q.options).sort().forEach(k => { text += `${k}.${q.options[k]}\n`; });
       }
+      text += `##答案 \n${restoreTags(q.answer || '')}\n##分析 \n${restoreTags(q.analysis || '')}\n##详解 \n${restoreTags(q.detailed || '')}\n`;
+  } else {
+      text += `##答案 \n${restoreTags(q.answer || '')}\n##分析 \n${restoreTags(q.analysis || '')}\n##详解 \n${restoreTags(q.detailed || '')}\n`;
   }
-  
-  text += `##答案 \n${q.answer || ''}\n##分析 \n${q.analysis || ''}\n##详解 \n${q.detailed || ''}\n`;
   
   const tagRegex = /\[img:([^\]]+)\]/g; 
   let imgCounter = 1; 
@@ -343,9 +406,7 @@ ${q.title || ''}
   parseTemplate();
 };
 
-const handleGlobalClick = () => { 
-    if (activeArea.value !== 'left') showKpDropdown.value = false;
-};
+const handleGlobalClick = () => { if (activeArea.value !== 'left') showKpDropdown.value = false; };
 const setActiveArea = (area) => { activeArea.value = area; };
 
 const switchMode = (modeIndex) => {
@@ -358,44 +419,29 @@ const switchMode = (modeIndex) => {
 
 const saveCurrentToCache = () => {
     const currentText = inputRawText.value;
-    if (currentMode.value === -1) {
-        fullTextCache.value = currentText;
-        return;
-    }
+    if (currentMode.value === -1) { fullTextCache.value = currentText; return; }
     const regex = /^\s*={3,}\s*$/gm;
     const rawChunks = fullTextCache.value.split(regex);
     let validChunkIdx = 0;
     const reconstructed = [];
     
     for (const chunk of rawChunks) {
-        if (!chunk.trim() || !/^\s*##/m.test(chunk)) {
-            reconstructed.push(chunk); 
-            continue;
-        }
-        if (validChunkIdx === currentMode.value) {
-            reconstructed.push('\n' + currentText.trim() + '\n');
-        } else {
-            reconstructed.push(chunk);
-        }
+        if (!chunk.trim() || !/^\s*##/m.test(chunk)) { reconstructed.push(chunk); continue; }
+        if (validChunkIdx === currentMode.value) reconstructed.push('\n' + currentText.trim() + '\n');
+        else reconstructed.push(chunk);
         validChunkIdx++;
     }
     fullTextCache.value = reconstructed.join('===');
 };
 
 const loadFromCache = (modeIndex) => {
-    if (modeIndex === -1) {
-        inputRawText.value = fullTextCache.value;
-        return;
-    }
+    if (modeIndex === -1) { inputRawText.value = fullTextCache.value; return; }
     const regex = /^\s*={3,}\s*$/gm;
     const rawChunks = fullTextCache.value.split(regex);
     let validChunkIdx = 0;
     for (const chunk of rawChunks) {
         if (!chunk.trim() || !/^\s*##/m.test(chunk)) continue;
-        if (validChunkIdx === modeIndex) {
-            inputRawText.value = chunk.trim();
-            return;
-        }
+        if (validChunkIdx === modeIndex) { inputRawText.value = chunk.trim(); return; }
         validChunkIdx++;
     }
     inputRawText.value = '';
@@ -411,41 +457,26 @@ const insertImgPlaceholder = (id) => {
         const end = textarea.selectionEnd || start;
         const text = inputRawText.value;
         inputRawText.value = text.substring(0, start) + placeholder + text.substring(end);
-        nextTick(() => {
-            textarea.focus();
-            textarea.setSelectionRange(start + placeholder.length, start + placeholder.length);
-        });
-    } else {
-        inputRawText.value += '\n' + placeholder;
-    }
+        nextTick(() => { textarea.focus(); textarea.setSelectionRange(start + placeholder.length, start + placeholder.length); });
+    } else { inputRawText.value += '\n' + placeholder; }
     manualParse();
 };
 
-const updateImgAlign = (id, align) => {
-    updateTag(id, align, null);
-};
-
+const updateImgAlign = (id, align) => { updateTag(id, align, null); };
 const handleSizeChange = (id, e) => {
     const val = parseInt(e.detail.value || e.target.value);
     imageSizes[id] = val;
     updateTag(id, null, val);
 };
-
 const updateTag = (id, newAlign, newWidth) => {
     let text = inputRawText.value;
-    
     inputRawText.value = text.replace(/\[img:([^\]]+)\]/g, (match, innerContent) => {
         const parts = innerContent.split(':');
-        
-        let pWidth = null;
-        let pAlign = null;
+        let pWidth = null; let pAlign = null;
         const tempParts = [...parts];
-        
         if (tempParts.length > 1 && /^\d+$/.test(tempParts[tempParts.length-1])) pWidth = tempParts.pop();
         if (tempParts.length > 1 && /^[lmr]$/.test(tempParts[tempParts.length-1])) pAlign = tempParts.pop();
-        
         const currentId = tempParts.join(':');
-        
         if (currentId === id) {
             const finalAlign = newAlign !== null ? newAlign : (pAlign || 'l'); 
             const finalWidth = newWidth !== null ? newWidth : (pWidth || (imageSizes[id] || 100));
@@ -454,7 +485,6 @@ const updateTag = (id, newAlign, newWidth) => {
         }
         return match;
     });
-    
     manualParse(); 
 };
 
@@ -465,8 +495,7 @@ const highlightError = (start, end, msg) => {
     setTimeout(() => {
         let ta = document.querySelector('.raw-editor textarea') || document.querySelector('.raw-editor');
         if(ta) { 
-            ta.focus(); 
-            ta.setSelectionRange(start, end); 
+            ta.focus(); ta.setSelectionRange(start, end); 
             const textBefore = ta.value.substring(0, start);
             const lineCount = textBefore.split('\n').length;
             ta.scrollTop = Math.max(0, (lineCount * 22) - 100); 
@@ -494,10 +523,6 @@ const validateTemplate = () => {
         else if (lineTrim.startsWith('##选项')) {
             const parts = line.split(/\s+/);
             if (parts.length < 2 || !/^\d+$/.test(parts[1])) { highlightError(lineStart, lineEnd, '选项布局数字必须同行'); return false; }
-            if (currentType && !currentType.includes('选')) { 
-                highlightError(lineStart, lineEnd, `非选择题不能包含选项`); 
-                return false; 
-            }
         }
         else if (lineTrim.startsWith('##题型')) {
             const parts = line.split(/\s+/);
@@ -530,10 +555,8 @@ const parseTemplate = () => {
 
   chunks.forEach(chunk => {
       if(!chunk.content.trim()) return;
-      
       if(/^\s*##/m.test(chunk.content)) {
           const q = parseSingleChunk(chunk.content, chunk.start);
-          
           if (q.title || q.type) {
               if (isEditing.value && newList.length === 0 && editingId.value) q.id = editingId.value;
               newList.push(q);
@@ -548,48 +571,104 @@ const parseTemplate = () => {
   previewList.value = newList;
   if (currentMode.value === -1) cachedPreviewList.value = newList;
 
-  if (garbageFound) {
-      highlightError(garbageFound.start, garbageFound.end, '发现无效内容(非题目)，已定位');
-  } else if (firstRegionErr) {
-      highlightError(firstRegionErr.start, firstRegionErr.end, firstRegionErr.msg);
-  }
+  if (garbageFound) highlightError(garbageFound.start, garbageFound.end, '发现无效内容(非题目)，已定位');
+  else if (firstRegionErr) highlightError(firstRegionErr.start, firstRegionErr.end, firstRegionErr.msg);
+};
+
+const processSubOptions = (subQ) => {
+    if (!subQ.rawOptionLines || subQ.rawOptionLines.length === 0) {
+        subQ.options = {};
+        subQ.optionRows = [];
+        return;
+    }
+    let optFullText = subQ.rawOptionLines.join('\n');
+    optFullText = optFullText.replace(/\[img:([^\]]+)\]/g, (match, inner) => {
+         const parts = inner.split(':'); let w=null, a=null;
+         if(parts.length>1 && /^\d+$/.test(parts[parts.length-1])) w=parts.pop();
+         if(parts.length>1 && /^[lmr]$/.test(parts[parts.length-1])) a=parts.pop();
+         const id = parts.join(':'); const url = tempUploadedImages.value[id];
+         return url ? `[img:${url}:${a||'l'}:${w||''}]` : match;
+    });
+
+    const rawOptions = [];
+    const parts = optFullText.split(/([A-Z][.、])/).filter(x=>x && x.trim());
+    subQ.options = {};
+    for(let i=0; i<parts.length; i+=2) {
+        if(i+1 < parts.length) {
+            const k = parts[i].replace(/[.、]/, '').trim();
+            const v = parts[i+1].trim();
+            rawOptions.push({ key: k, value: v });
+            subQ.options[k] = v;
+        }
+    }
+    subQ.optionRows = distributeOptions(rawOptions, subQ.optionLayout || 4);
 };
 
 const parseSingleChunk = (chunkText, chunkStartOffset = 0) => {
     const lines = chunkText.split('\n');
     const result = {};
     let currentModule = '';
-    const multiLineModules = ['题干', '分析', '答案', '选项', '详解'];
+    const multiLineModules = ['题干', '分析', '答案', '选项', '详解', '小题', '小题标签'];
     
     const qData = {
         id: '', year: '2023', source: '新高考', difficulty: 3, type: '单选题', qNumber: '1',
         title: '', answer: '', analysis: '', detailed: '',
         optionLayout: 4, options: {}, optionRows: [],
         categoryIds: [], tags: [], showAnswer: true,
-        province: '', region: '', 
-        _regionErr: null
+        province: '', region: '', _regionErr: null,
+        subQuestions: [] 
     };
 
     let charCount = 0; 
+    let currentSubQ = null; 
+
+    const pushCurrentSubQ = () => {
+        if (currentSubQ) {
+            processSubOptions(currentSubQ); 
+            delete currentSubQ.rawOptionLines;
+            qData.subQuestions.push(currentSubQ);
+        }
+    };
 
     lines.forEach(line => {
-        const lineLen = line.length + 1; 
+        const lineLen = line.length + 1;
         const trimmed = line.trim();
         const headerMatch = trimmed.match(/^##\s*([^\s]+)(?:\s+(.*))?$/);
-        
+
         if (headerMatch) {
             const moduleName = headerMatch[1];
-            const content = headerMatch[2];
-            currentModule = moduleName;
+            const content = headerMatch[2] || '';
             
+            if (moduleName === '小题') {
+                pushCurrentSubQ();
+                currentSubQ = { 
+                    content: content ? content + '\n' : '', 
+                    tags: [], answer: '', analysis: '', detailed: '',
+                    rawOptionLines: [], 
+                    optionLayout: 4
+                };
+                currentModule = '小题内容';
+                charCount += lineLen;
+                return;
+            }
+            if (currentSubQ && moduleName === '选项') {
+                if (content && /^\d+$/.test(content)) currentSubQ.optionLayout = parseInt(content);
+                currentModule = '小题_选项';
+                charCount += lineLen;
+                return;
+            }
+            if (moduleName === '小题标签') {
+                if (currentSubQ) currentSubQ.tags = content.split('/').map(t=>t.trim()).filter(x=>x);
+                currentModule = null;
+                charCount += lineLen;
+                return;
+            }
             if (moduleName === '地区') {
                 if (content) {
                     const absStart = chunkStartOffset + charCount;
                     const absEnd = absStart + line.length;
-                    
-                    if (/(香港|澳门|台湾)/.test(content)) {
-                        qData._regionErr = { start: absStart, end: absEnd, msg: '暂不支持该地区录入' };
-                    } else {
+                    if (/(香港|澳门|台湾)/.test(content)) qData._regionErr = { start: absStart, end: absEnd, msg: '暂不支持该地区录入' };
+                    else {
                         const inputs = content.split('/');
                         const validProvincesFound = [];
                         let hasError = false;
@@ -603,40 +682,54 @@ const parseSingleChunk = (chunkText, chunkStartOffset = 0) => {
                         if (!hasError && validProvincesFound.length > 0) qData.province = validProvincesFound.join('/');
                     }
                 }
+            } 
+            
+            currentModule = moduleName;
+            
+            if (currentSubQ && ['答案', '分析', '详解'].includes(moduleName)) {
+                 if(content) currentSubQ[moduleName === '详解' ? 'detailed' : (moduleName === '分析' ? 'analysis' : 'answer')] = content;
+                 currentModule = '小题_' + moduleName; 
             } else {
-                if (!result[currentModule]) result[currentModule] = [];
-                if (content) result[currentModule].push(content);
+                 if (!result[currentModule]) result[currentModule] = [];
+                 if (content) result[currentModule].push(content);
             }
-            if (!multiLineModules.includes(moduleName)) currentModule = null; 
+
         } else {
-            if (currentModule) {
-                if (trimmed === '//') result[currentModule].push('');
-                else if (trimmed) result[currentModule].push(line); 
+            let processedLine = line;
+            if (line.includes('[缩进]')) processedLine = `<div style="text-indent: 2em;">${line.replace('[缩进]', '')}</div>`;
+            else if (line.includes('[居中]')) processedLine = `<div style="text-align: center; font-weight: bold;">${line.replace('[居中]', '')}</div>`;
+
+            if (currentSubQ) {
+                if (currentModule === '小题内容') currentSubQ.content += processedLine + '\n';
+                else if (currentModule === '小题_选项') currentSubQ.rawOptionLines.push(processedLine);
+                else if (currentModule === '小题_答案') currentSubQ.answer += processedLine + '\n';
+                else if (currentModule === '小题_分析') currentSubQ.analysis += processedLine + '\n';
+                else if (currentModule === '小题_详解') currentSubQ.detailed += processedLine + '\n';
+            } else {
+                if (currentModule) {
+                   if (trimmed === '//') result[currentModule].push('');
+                   else result[currentModule].push(processedLine);
+                }
             }
         }
         charCount += lineLen;
     });
 
+    pushCurrentSubQ();
+
     const getVal = (key) => {
         if (!result[key]) return '';
         const rawStr = result[key].join(multiLineModules.includes(key) ? '\n' : '/');
-        
         return rawStr.replace(/\[img:([^\]]+)\]/g, (match, innerContent) => {
             const parts = innerContent.split(':');
-            let width = null;
-            let align = null;
-            
+            let width = null; let align = null;
             if (parts.length > 1 && /^\d+$/.test(parts[parts.length - 1])) width = parts.pop();
             if (parts.length > 1 && /^[lmr]$/.test(parts[parts.length - 1])) align = parts.pop();
-            
             const id = parts.join(':');
             const url = tempUploadedImages.value[id];
-            
             if (url) {
                 let newTag = `[img:${url}`;
-                if (align) newTag += `:${align}`;
-                else if (width) newTag += `:l`; 
-                
+                if (align) newTag += `:${align}`; else if (width) newTag += `:l`; 
                 if (width) newTag += `:${width}`;
                 newTag += `]`;
                 return newTag;
@@ -645,41 +738,39 @@ const parseSingleChunk = (chunkText, chunkStartOffset = 0) => {
         });
     };
 
-    qData.year = getVal('年份'); 
-    qData.source = getVal('来源'); qData.qNumber = getVal('题号');
+    qData.year = getVal('年份'); qData.source = getVal('来源'); qData.qNumber = getVal('题号');
     qData.difficulty = parseInt(getVal('难度')) || 3; qData.type = getVal('题型') || '单选题';
-    qData.title = getVal('题干'); 
-    qData.region = qData.province; 
+    qData.title = getVal('题干'); qData.region = qData.province; 
 
     const kpRaw = getVal('知识点');
     qData.categoryIds = kpRaw ? kpRaw.split('/').map(n=>props.knowledgeList.find(l=>l.title===n.trim())?.id).filter(x=>x) : [];
     const tagRaw = getVal('标签');
     qData.tags = tagRaw ? tagRaw.split('/').map(t=>t.trim()).filter(x=>x) : [];
 
-    if (qData.type.includes('选')) {
+    if (qData.subQuestions.length > 0) {
+        const allTags = new Set(qData.tags);
+        qData.subQuestions.forEach(sq => {
+            if (sq.tags) sq.tags.forEach(t => allTags.add(t));
+        });
+        qData.tags = Array.from(allTags);
+    }
+
+    if (!qData.subQuestions.length && qData.type.includes('选')) {
         const optLines = result['选项'] || [];
-        let targetCols = 4;
-        let startIdx = 0;
-        if (optLines.length > 0 && /^\d+$/.test(optLines[0].trim())) { 
-            targetCols = parseInt(optLines[0].trim()); 
-            startIdx = 1;
-        }
+        let targetCols = 4; let startIdx = 0;
+        if (optLines.length > 0 && /^\d+$/.test(optLines[0].trim())) { targetCols = parseInt(optLines[0].trim()); startIdx = 1; }
         
         let optFullText = optLines.slice(startIdx).join('\n');
-        
         optFullText = optFullText.replace(/\[img:([^\]]+)\]/g, (match, inner) => {
-             const parts = inner.split(':');
-             let w=null, a=null;
+             const parts = inner.split(':'); let w=null, a=null;
              if(parts.length>1 && /^\d+$/.test(parts[parts.length-1])) w=parts.pop();
              if(parts.length>1 && /^[lmr]$/.test(parts[parts.length-1])) a=parts.pop();
-             const id = parts.join(':');
-             const url = tempUploadedImages.value[id];
+             const id = parts.join(':'); const url = tempUploadedImages.value[id];
              return url ? `[img:${url}:${a||'l'}:${w||''}]` : match;
         });
 
         const rawOptions = [];
         const parts = optFullText.split(/([A-Z][.、])/).filter(x=>x && x.trim());
-        
         for(let i=0; i<parts.length; i+=2) {
             if(i+1 < parts.length) {
                 const k = parts[i].replace(/[.、]/, '').trim();
@@ -692,9 +783,7 @@ const parseSingleChunk = (chunkText, chunkStartOffset = 0) => {
         qData.optionRows = distributeOptions(rawOptions, targetCols);
     } else { qData.options = {}; qData.optionRows = []; }
 
-    qData.analysis = getVal('分析');
-    qData.answer = getVal('答案');
-    qData.detailed = getVal('详解');
+    qData.analysis = getVal('分析'); qData.answer = getVal('答案'); qData.detailed = getVal('详解');
     
     return qData;
 };
@@ -717,46 +806,24 @@ const updateCursorPos = (e) => {
     }
 };
 const onEditorBlur = () => { setTimeout(() => { showKpDropdown.value = false; }, 200); editorFocus.value = false; };
-const handleEditorInput = (e) => {
-    if(e.target) cursorPosition = e.target.selectionStart;
-};
+const handleEditorInput = (e) => { if(e.target) cursorPosition = e.target.selectionStart; };
 
 const handleEditorKeydown = (e) => {
     if (!showKpDropdown.value || !kpSearchResults.value.length) return;
-    if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        activeKpIndex.value = (activeKpIndex.value + 1) % kpSearchResults.value.length;
-    } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        activeKpIndex.value = (activeKpIndex.value - 1 + kpSearchResults.value.length) % kpSearchResults.value.length;
-    } else if (e.key === 'Enter' || e.key === 'Tab') {
-        e.preventDefault();
-        selectKp(kpSearchResults.value[activeKpIndex.value]);
-    } else if (e.key === 'Escape') {
-        showKpDropdown.value = false;
-    }
+    if (e.key === 'ArrowDown') { e.preventDefault(); activeKpIndex.value = (activeKpIndex.value + 1) % kpSearchResults.value.length; } 
+    else if (e.key === 'ArrowUp') { e.preventDefault(); activeKpIndex.value = (activeKpIndex.value - 1 + kpSearchResults.value.length) % kpSearchResults.value.length; } 
+    else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); selectKp(kpSearchResults.value[activeKpIndex.value]); } 
+    else if (e.key === 'Escape') { showKpDropdown.value = false; }
 };
 
 const selectKp = (kp) => {
   const lines = inputRawText.value.split('\n');
-  const idx = currentEditingLineIdx.value;
-  if(idx === -1) return;
-  const line = lines[idx];
-  const lastSlash = line.lastIndexOf('/');
-  const spaceIdx = line.indexOf(' ');
-  const prefixLimit = Math.max(lastSlash, spaceIdx);
-  let newLine = (prefixLimit === -1) ? ('##知识点 ' + kp.title) : (line.substring(0, prefixLimit + 1) + kp.title);
-  lines[idx] = newLine;
-  inputRawText.value = lines.join('\n');
+  inputRawText.value += `##知识点 ${kp.title}\n`;
   showKpDropdown.value = false;
   parseTemplate();
 };
 
-const handleEditorClick = () => { 
-    updateCursorPos({});
-    showKpDropdown.value = false; 
-};
-
+const handleEditorClick = () => { updateCursorPos({}); showKpDropdown.value = false; };
 const handleUploadClick = (e) => {
     setActiveArea('right');
     if (e && (e.ctrlKey || e.metaKey)) return;
@@ -811,21 +878,22 @@ const handlePreviewBgClick = () => {
     lastClickTime = now;
 };
 
-// 修改：新增保存并退出方法
-const handleSaveAndExit = async () => {
-    const success = await handleSave();
-    if (success) {
-        close();
-    }
+const handlePreviewTagClick = (tag) => {
+    activeFilterTag.value = activeFilterTag.value === tag ? '' : tag;
+};
+const isSubQActive = (subQ) => {
+    if (!activeFilterTag.value) return false;
+    return subQ.tags && subQ.tags.includes(activeFilterTag.value);
 };
 
-// 修改：handleSave 返回 Boolean 以供 handleSaveAndExit 使用
+const handleSaveAndExit = async () => {
+    const success = await handleSave();
+    if (success) close();
+};
+
 const handleSave = async () => {
   if (currentMode.value !== -1) switchMode(-1); else parseTemplate();
-  if(previewList.value.length === 0) {
-      uni.showToast({title:'没有识别到题目', icon:'none'});
-      return false;
-  }
+  if(previewList.value.length === 0) { uni.showToast({title:'没有识别到题目', icon:'none'}); return false; }
   
   const hasRegionError = previewList.value.some(q => q._regionErr);
   if (hasRegionError) {
@@ -842,6 +910,13 @@ const handleSave = async () => {
           delete payload.imgPosCode; delete payload.imgAlign; delete payload.imgId;
           delete payload._regionErr; delete payload.region; 
           
+          if (payload.subQuestions) {
+              payload.subQuestions.forEach(sq => {
+                  delete sq.optionRows; // 不保存渲染用的 optionRows，只保存 options 数据
+                  delete sq.rawOptionLines;
+              });
+          }
+
           if(item.id) await updateQuestion(item.id, payload);
           else await saveQuestion(payload);
       }
@@ -857,144 +932,35 @@ const handleSave = async () => {
   }
 };
 const getKnowledgeTags = (ids) => ids.map(id => props.knowledgeList.find(l => l.id === id) || {id, title:id}).filter(x=>x);
-
 const selectPreviewItem = (idx) => { currentPreviewIdx.value = idx; };
-
 defineExpose({ open });
 </script>
 
 <style scoped>
 .add-modal-header { background: #f9f9f9; padding: 10px 15px; border-bottom: 1px solid #eee; display: flex; flex-shrink: 0; justify-content: space-between; align-items: center; }
 .header-btns { display: flex; gap: 10px; }
-.header-info { text-align: left; /* 修改：左对齐 */ }
-.menu-btn { 
-  padding: 2px 16px;       /* 调整内边距 */
-  border-radius: 6px;      /* 圆角 20px -> 6px */
-  font-size: 13px; 
-  cursor: pointer; 
-  border: none;            /* 去掉默认边框 */
-  background: #f1f5f9;     /* 默认灰色背景 */
-  color: #64748b;          /* 默认文字颜色 */
-  font-weight: bold; 
-  display: flex; 
-  align-items: center; 
-  justify-content: center;
-  line-height: 1.5;
-}
+.header-info { text-align: left; }
+.menu-btn { padding: 2px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; border: none; background: #f1f5f9; color: #64748b; font-weight: bold; display: flex; align-items: center; justify-content: center; line-height: 1.5; }
 .menu-btn:hover { background: #e2e8f0; }
-
-.menu-btn.primary { 
-  background: #2563eb; 
-  color: white; 
-  border: 1px solid #2563eb; /* 保持高度一致 */
-}
-
-.menu-btn.outline { 
-  background: transparent; 
-  border: 1px solid #2563eb; 
-  color: #2563eb; 
-  box-sizing: border-box; 
-}
+.menu-btn.primary { background: #2563eb; color: white; border: 1px solid #2563eb; }
+.menu-btn.outline { background: transparent; border: 1px solid #2563eb; color: #2563eb; box-sizing: border-box; }
 .four-col-layout { display: flex; height: 700px; border-top: 1px solid #eee; overflow: hidden; }
 .nav-col { width: 50px; background: #f8fafc; border-right: 1px solid #e2e8f0; display: flex; flex-direction: column; align-items: center; padding-top: 10px; flex-shrink: 0; }
-.nav-item { 
-  width: 30px; 
-  height: 30px; 
-  border-radius: 50%; 
-  
-  display: flex; 
-  align-items: center;    
-  justify-content: center; 
-  padding: 0;              
-  line-height: 1;          
-
-  font-size: 11px;         
-  
-  /* --- 修改这里 --- */
-  /* margin-bottom: 8px; */      /* 删除旧的 */
-  margin: 0 auto 8px auto;       /* 新增：上0，左右自动(居中)，下8px */
-  /* ---------------- */
-  
-  cursor: pointer; 
-  font-weight: bold; 
-  color: #64748b; 
-  background: #fff; 
-  border: 1px solid #e2e8f0; 
-  transition: all 0.2s; 
-  box-sizing: border-box; 
-}
-
-/* 鼠标悬停效果 */
+.nav-item { width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; padding: 0; line-height: 1; font-size: 11px; margin: 0 auto 8px auto; cursor: pointer; font-weight: bold; color: #64748b; background: #fff; border: 1px solid #e2e8f0; transition: all 0.2s; box-sizing: border-box; }
 .nav-item:hover { transform: scale(1.05); }
-
-/* "全"字按钮样式调整 */
-.nav-item.all { 
-  border: 1px solid #94a3b8; /* 建议改成 1px 边框，和数字保持大小一致 */
-  color: #475569; 
-}
-
-/* 选中状态样式 */
-.nav-item.active { 
-  background: #f97316;     /* 橙色填充 */
-  color: white; 
-  border-color: #f97316;   /* 橙色边框 */
-  box-shadow: 0 2px 5px rgba(249, 115, 22, 0.3); 
-}
+.nav-item.all { border: 1px solid #94a3b8; color: #475569; }
+.nav-item.active { background: #f97316; color: white; border-color: #f97316; box-shadow: 0 2px 5px rgba(249, 115, 22, 0.3); }
 .nav-scroll { flex: 1; width: 100%; display: flex; flex-direction: column; align-items: center; overflow-y: auto; }
 .nav-scroll::-webkit-scrollbar { display: none; }
 .col-editor { width: 25%; border-right: 1px solid #eee; display: flex; flex-direction: column; padding: 10px; position: relative; min-width: 250px; overflow-y: auto; height: 100%; box-sizing: border-box; }
 .editor-wrap { flex: 1; position: relative;  border-radius: 4px; overflow: hidden; min-height: 500px; background-color: #f0f0f0;}
 .raw-editor { width: 100%; height: 100%; padding: 10px; box-sizing: border-box; font-family: monospace; font-size: 14px; line-height: 1.6; border: none; outline: none; resize: none; }
-
-/* 修改：增加宽度到 58%，移除 overflow-y: auto 以固定转化按钮 */
 .col-preview { width: 58%; display: flex; flex-direction: column; background: #f8fafc; min-width: 400px; position: relative; height: 100%; box-sizing: border-box; }
-
 .convert-bar { position: absolute; left: 0; top: 50%; transform: translate(-50%, -50%); z-index: 10; }
-/* 原位置：约 650 行左右 */
-/* 约 650 行左右 */
-.convert-btn {
-  /* --- 核心修改：去掉背景和阴影 --- */
-  background: transparent;  /* 变为透明 */
-  box-shadow: none;         /* 去掉阴影 */
-  border: none;             /* 去掉边框 */
-  
-  /* --- 调整尺寸 --- */
-  width: 30px;              /* 点击区域宽度 */
-  height: 30px;             /* 点击区域高度 */
-  border-radius: 50%;       /* 鼠标放上去时显示的背景圆角 */
-  
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: all 0.2s;
-  
-  /* 稍微往左偏移一点，让它骑在分割线上，视觉更自然 */
-  margin-left: -15px;       
-  background-color: #fff;   /* 给个白色底，防止透过分割线 */
-  border: 1px solid #e2e8f0; /* 加一个极细的边框让它显眼一点（可选） */
-}
-
-.convert-btn:hover {
-  background: #eff6ff;      /* 悬停时给一个淡淡的蓝色背景圆圈 */
-  transform: scale(1.1);    /* 悬停放大一点点 */
-  border-color: #2563eb;
-}
-
-.convert-icon {
-  width: 24px;
-  height: 24px;
-  
-  /* --- 核心修改：图标颜色 --- */
-  /* 如果你的 SVG 是黑色的，不需要滤镜 */
-  /* 如果你想让它变成主题蓝，使用下面的滤镜： */
-  filter: invert(31%) sepia(93%) saturate(1376%) hue-rotate(202deg) brightness(94%) contrast(96%);
-  
-  /* ★千万要删除之前写的 brightness(0) invert(1)，否则图标是白色的看不见 */
-}
-/* 修改：确保内部滚动条生效 */
+.convert-btn { background: transparent; box-shadow: none; border: none; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; margin-left: -15px; background-color: #fff; border: 1px solid #e2e8f0; }
+.convert-btn:hover { background: #eff6ff; transform: scale(1.1); border-color: #2563eb; }
+.convert-icon { width: 24px; height: 24px; filter: invert(31%) sepia(93%) saturate(1376%) hue-rotate(202deg) brightness(94%) contrast(96%); }
 .preview-scroll { flex: 1; padding: 12px 2px 12px 12px; box-sizing: border-box; overflow-y: auto; }
-
 .empty-preview { text-align: center; color: #94a3b8; margin-top: 50px; }
 .preview-card { min-height: 100px; background: white; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border: 2px solid transparent; transition: all 0.2s; width: 92.2%;}
 .preview-card.active { border-color: #2563eb; box-shadow: 0 0 0 4px rgba(37,99,235,0.1); }
@@ -1011,10 +977,18 @@ defineExpose({ open });
 .seq-num { font-weight: bold; color: #cbd5e1; }
 .q-title { display: block; width: 100%; font-size: 15px; line-height: 1.6; color: #1e293b; }
 .body-row { display: flex; margin-bottom: 10px; }
-
-/* 修改：宽度减小到 17%，最小宽度适应调整 */
+.material-box { border-bottom: 1px dashed #e2e8f0; padding-bottom: 10px; margin-bottom: 15px; }
+.sub-q-item { margin-bottom: 20px; padding: 8px; border-radius: 6px; transition: background 0.3s; }
+.sub-q-item.highlight-red { background-color: #fef2f2; }
+.sub-q-item.highlight-red .sub-q-content :deep(.latex-text-container) { color: #ef4444 !important; font-weight: bold; }
+.sub-q-tags { margin-top: 8px; display: flex; gap: 10px; }
+.mini-tag { font-size: 10px; background: #f1f5f9; color: #64748b; padding: 2px 8px; border-radius: 10px; cursor: pointer; }
+.mini-tag:hover { background: #e2e8f0; color: #334155; }
+.sub-q-ans-box { margin-top: 8px; padding: 8px; background: #f8fafc; border-radius: 4px; font-size: 13px; color: #334155; }
+.ans-label { font-weight: bold; color: #2563eb; margin-right: 4px; }
+.mb-1 { margin-bottom: 4px; }
+.mt-2 { margin-top: 8px; }
 .col-image { width: 17%; display: flex; flex-direction: column; padding: 10px; background: #fff; min-width: 180px; overflow-y: auto; height: 100%; box-sizing: border-box; }
-
 .uploaded-list { flex: 1; margin-bottom: 15px; }
 .img-item { border: 1px solid #eee; padding: 10px; border-radius: 6px; margin-bottom: 15px; background: #fcfcfc; }
 .img-preview-box { width: 100%; height: 120px; background: #f1f1f1; border-radius: 4px; display: flex; align-items: center; justify-content: center; overflow: hidden; margin-bottom: 8px; }
@@ -1024,18 +998,12 @@ defineExpose({ open });
 .copy-btn { font-size: 12px; color: #2563eb; cursor: pointer; text-decoration: underline; font-weight: bold;}
 .upload-area { border: 2px dashed #cbd5e1; border-radius: 8px; height: 100px; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; background: #f8fafc; flex-shrink: 0; outline: none; }
 .upload-area:focus { border-color: #2563eb; background: #eff6ff; }
-.upload-icon {
-  width: 32px;       /* 设置宽度 */
-  height: 32px;      /* 设置高度 */
-  margin-bottom: 6px;
-  /* font-size: 28px;  <-- 记得删除这行，或者把它注释掉 */
-  opacity: 0.6;
-}
+.upload-icon { width: 32px; height: 32px; margin-bottom: 6px; opacity: 0.6; }
 .upload-text { font-size: 11px; color: #64748b; }
 .opt-container { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; color: #334155; }
 .opt-row { display: flex; gap: 10px; width: 100%; }
-.opt-item { flex: 1; display: flex; align-items: center; font-size: 14px; } /* 关键修改：flex-start -> center */
-.opt-key { font-weight: bold; margin-right: 8px; flex-shrink: 0; line-height: 1.6; } /* 移除了 margin-top */
+.opt-item { flex: 1; display: flex; align-items: center; font-size: 14px; } 
+.opt-key { font-weight: bold; margin-right: 8px; flex-shrink: 0; line-height: 1.6; } 
 .opt-val { flex: 1; word-break: break-all; }
 .opt-item :deep(.latex-text-container) { display: inline-block; width: auto; vertical-align: middle; }
 .answer-box { background: #f0f9ff; padding: 12px 15px; border-radius: 6px; border: 1px dashed #bae6fd; font-size: 14px; color: #0c4a6e; }
@@ -1047,97 +1015,21 @@ defineExpose({ open });
 .ans-tag.detailed { background-color: #10b981; } 
 .ans-content { font-size: 14px; line-height: 1.6; color: #334155; }
 .q-footer { border-top: 1px solid #f1f5f9; margin-top: 20px; padding-top: 16px; display: flex; justify-content: space-between; align-items: center; }
-.toggle-ans-btn {
-  font-size: 12px;
-  color: #64748b;
-  cursor: pointer;
-  padding: 4px 8px;      /* 稍微增加一点内边距 */
-  border-radius: 4px;
-  background: #f1f5f9;
-  
-  /* --- 新增：Flex 布局让图标和文字垂直居中 --- */
-  display: flex;
-  align-items: center;
-  gap: 4px;              /* 图标和文字之间的间距 */
-  transition: all 0.2s;
-}
-
-.toggle-ans-btn:hover {
-  background: #e2e8f0;
-  color: #333;
-}
-
-/* --- 新增：图标样式 --- */
-.toggle-icon {
-  width: 14px;
-  height: 14px;
-  opacity: 0.7;          /* 让图标稍微灰一点，不那么刺眼 */
-}
+.toggle-ans-btn { font-size: 12px; color: #64748b; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #f1f5f9; display: flex; align-items: center; gap: 4px; transition: all 0.2s; }
+.toggle-ans-btn:hover { background: #e2e8f0; color: #333; }
+.toggle-icon { width: 14px; height: 14px; opacity: 0.7; }
 .tags-row { display: flex; gap: 8px; align-items: center; }
 .tag-badge { font-size: 11px; padding: 2px 6px; border-radius: 4px; cursor: pointer; display: flex;align-items: center;}
-.tag-icon {
-  width: 12px;       /* 限制宽度 */
-  height: 12px;      /* 限制高度 */
-  margin-right: 3px; /* 给图标和文字之间加点空隙 */
-}
-.tag-badge text {
-  line-height: 1;      /* 让行高紧贴文字高度 */
-  position: relative;  /* 开启相对定位 */
-  top: -0.1px;           /* 核心：强制往上提 1px (如果还不够可以改成 -2px) */
-}
+.tag-icon { width: 12px; height: 12px; margin-right: 3px; }
+.tag-badge text { line-height: 1; position: relative; top: -0.1px; }
 .tag-badge.red { background: #fef2f2; color: #ef4444; border: 1px solid #fee2e2; }
 .tag-badge.blue { background: #eff6ff; color: #3b82f6; border: 1px solid #dbeafe; }
-.img-ctrl-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: 8px;
-  border-top: 1px dashed #eee;
-  padding-top: 8px;
-}
-.ctrl-lbl {
-  font-size: 11px;
-  color: #94a3b8;
-  width: 30px;
-}
-.align-group {
-  display: flex;
-  gap: 4px;
-}
-.align-btn {
-  width: 40px; 
-  height: 24px;
-  background: #fff;
-  border: 1px solid #cbd5e1;
-  border-radius: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 10px;
-  cursor: pointer;
-  color: #64748b;
-}
-.align-btn:hover {
-  border-color: #2563eb;
-  color: #2563eb;
-  background: #eff6ff;
-}
-.slider-box {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-.size-slider {
-  flex: 1;
-  height: 20px;
-  cursor: pointer;
-}
-.size-val {
-  font-size: 11px;
-  color: #2563eb;
-  font-weight: bold;
-  width: 35px;
-  text-align: right;
-}
+.img-ctrl-row { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; border-top: 1px dashed #eee; padding-top: 8px; }
+.ctrl-lbl { font-size: 11px; color: #94a3b8; width: 30px; }
+.align-group { display: flex; gap: 4px; }
+.align-btn { width: 40px; height: 24px; background: #fff; border: 1px solid #cbd5e1; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 10px; cursor: pointer; color: #64748b; }
+.align-btn:hover { border-color: #2563eb; color: #2563eb; background: #eff6ff; }
+.slider-box { flex: 1; display: flex; align-items: center; gap: 5px; }
+.size-slider { flex: 1; height: 20px; cursor: pointer; }
+.size-val { font-size: 11px; color: #2563eb; font-weight: bold; width: 35px; text-align: right; }
 </style>
