@@ -63,7 +63,19 @@ const QuestionSchema = new mongoose.Schema({
     type: String, difficulty: Number, year: String, 
     source: String, qNumber: String, addedTime: String, optionLayout: Number, 
     options: { A: String, B: String, C: String, D: String }, tags: [String], code: String,
-    province: String 
+    province: String,
+    // --- 新增：小题数组结构 ---
+    subQuestions: [{
+        content: String,  
+        answer: String,   
+        analysis: String, 
+        detailed: String, 
+        tags: [String],
+        // 新增以下两个字段：
+        options: { type: Map, of: String }, // 存储小题选项 {A: "xx", B: "xx"}
+        optionLayout: Number                // 存储小题选项排列列数 (1, 2, 4)
+    }]
+    // -------------------------
 });
 QuestionSchema.set('toJSON', { virtuals: true, versionKey: false, transform: (doc, ret) => { ret.id = ret._id.toString(); delete ret._id; } });
 
@@ -133,48 +145,30 @@ app.get('/api/categories', async (req, res) => {
   res.json(buildTree(flatCats));
 });
 
-// ==========================================
-// [核心修改] 目录管理接口：支持 update_list 的递归同步
-// ==========================================
-
-// 辅助：递归删除某个分类及其所有子分类
 const deleteCategoryAndChildren = async (catId) => {
-    // 1. 找儿子
     const children = await Category.find({ parentId: catId });
-    // 2. 递归杀儿子
     for (const child of children) {
         await deleteCategoryAndChildren(child.id);
     }
-    // 3. 杀自己
     await Category.deleteOne({ id: catId });
 };
 
-// 辅助：递归保存（同步）
 const syncCategoriesRecursive = async (nodes, parentId, subjectId) => {
-    // 1. 获取该层级下数据库中已有的节点
     const query = parentId ? { parentId } : { subjectId, parentId: null };
     const existingNodes = await Category.find(query);
-    
-    // 用于记录哪些旧节点被“复用”了，剩下的就是该删除的
     const usedIds = new Set();
 
-    // 2. 遍历前端传来的新列表
     for (let i = 0; i < nodes.length; i++) {
         const node = nodes[i];
         let currentId = null;
-
-        // 尝试用【标题】去匹配现有的节点
-        // (前端文本编辑会丢失ID，所以必须用标题找回，否则每次都会全删全建，导致题目关联丢失)
         const match = existingNodes.find(ex => ex.title === node.title && !usedIds.has(ex.id));
 
         if (match) {
-            // [A] 找到了：复用旧节点，更新顺序
             match.order = i;
             await match.save();
             currentId = match.id;
             usedIds.add(match.id);
         } else {
-            // [B] 没找到：创建新节点
             const newCat = new Category({
                 id: new mongoose.Types.ObjectId().toString(),
                 subjectId,
@@ -186,12 +180,9 @@ const syncCategoriesRecursive = async (nodes, parentId, subjectId) => {
             currentId = newCat.id;
         }
 
-        // 3. 递归处理子节点
         if (node.children && node.children.length > 0) {
             await syncCategoriesRecursive(node.children, currentId, subjectId);
         } else {
-            // 如果前端说这个节点没儿子，那我们也要确保数据库里没儿子
-            // 查一下有没有残留的子节点，有就全删了
             const orphanChildren = await Category.find({ parentId: currentId });
             for (const orphan of orphanChildren) {
                 await deleteCategoryAndChildren(orphan.id);
@@ -199,13 +190,11 @@ const syncCategoriesRecursive = async (nodes, parentId, subjectId) => {
         }
     }
 
-    // 4. 清理当前层级中，未被使用的旧节点（即前端文本里删掉的那些行）
     const toDelete = existingNodes.filter(ex => !usedIds.has(ex.id));
     for (const d of toDelete) {
         await deleteCategoryAndChildren(d.id);
     }
 };
-
 
 app.post('/api/categories/manage', async (req, res) => {
     const { action, subjectId, parentId, data, id, sourceId, targetId, position, title, children } = req.body;
@@ -221,10 +210,8 @@ app.post('/api/categories/manage', async (req, res) => {
         } else if (action === 'rename') { 
             await Category.findOneAndUpdate({ id: id }, { title: title });
         } else if (action === 'delete') {
-            // 单个删除也使用递归删除逻辑
             await deleteCategoryAndChildren(id);
         } else if (action === 'update_list') {
-            // [核心逻辑]：全量同步子目录
             if (children && Array.isArray(children)) {
                 await syncCategoriesRecursive(children, parentId, subjectId);
             }
@@ -237,7 +224,6 @@ app.post('/api/categories/manage', async (req, res) => {
         res.status(500).json({ error: e.message }); 
     }
 });
-// ==========================================
 
 app.get('/api/questions', async (req, res) => {
   const { categoryIds, subjectId, tags, type, difficulty, province, year, source, qNumber } = req.query;
