@@ -11,6 +11,10 @@
         <view class="header-info" v-else><view></view></view>
 
         <view class="header-btns">
+            <button class="menu-btn" style="color: #7c3aed; border-color: #7c3aed; margin-right: 15px;" @click="openOCRModal">
+                ✨ 智能识别
+            </button>
+
             <button class="menu-btn primary" @click="handleSave">保存</button>
             <button class="menu-btn" @click="close">退出</button>
             <button class="menu-btn outline" @click="handleSaveAndExit">保存并退出</button>
@@ -212,10 +216,43 @@
       </view>
     </view>
   </CommonModal>
+
+  <CommonModal :isOpen="showOCRModal" maxWidth="800px" @close="closeOCRModal">
+    <template #header>
+        <view class="add-modal-header">
+            <text style="font-weight: bold; font-size: 16px;">📄 题目识别 (PDF/图片)</text>
+            <button class="menu-btn" @click="closeOCRModal">关闭</button>
+        </view>
+    </template>
+
+    <view class="ocr-body" @dragover.prevent @drop.prevent="handleOCRDrop">
+        
+        <view v-if="!ocrResult && !ocrLoading" class="upload-zone" @click="chooseOCRFile">
+            <image src="/static/icons/相机.svg" style="width:48px; height:48px; opacity:0.5; margin-bottom:10px;"></image>
+            <text style="font-size:16px; font-weight:bold; color:#475569;">点击 / 粘贴 / 拖拽 上传</text>
+            <text style="font-size:12px; color:#94a3b8; margin-top:5px;">支持 PDF, JPG, PNG (粘贴请先点击此处)</text>
+        </view>
+
+        <view v-if="ocrLoading" class="loading-zone">
+            <view class="spinner"></view>
+            <text style="margin-top:15px; color:#2563eb;">正在云端识别中，请稍候...</text>
+            <text style="font-size:12px; color:#64748b; margin-top:5px;">(PDF文件可能需要 30秒+)</text>
+        </view>
+
+        <view v-if="ocrResult" class="result-zone">
+            <view class="result-tip">
+                ✅ 识别成功！请复制下方内容，或直接拖拽图片ID。
+                <text class="copy-link" @click="copyOCRResult">一键复制</text>
+            </view>
+            <textarea class="result-editor" v-model="ocrResult" maxlength="-1"></textarea>
+        </view>
+
+    </view>
+  </CommonModal>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onUnmounted, nextTick } from 'vue';
+import { ref, reactive, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import CommonModal from '@/components/CommonModal.vue';
 import LatexText from '@/components/LatexText.vue';
 import { saveQuestion, updateQuestion } from '@/api/question.js';
@@ -257,6 +294,11 @@ const parseVersion = ref(0);
 const activeFilterTag = ref(''); 
 let lastClickTime = 0;
 let globalShowAnswer = true;
+
+// OCR 相关状态
+const showOCRModal = ref(false);
+const ocrLoading = ref(false);
+const ocrResult = ref('');
 
 const PROVINCE_LIST = [
     "全国", "北京", "天津", "上海", "重庆", "河北", "山西", "内蒙古", 
@@ -306,7 +348,6 @@ const initAdd = () => {
   parseTemplate();
 };
 
-// --- [核心修复] 初始化编辑逻辑：回显并还原格式 ---
 const initEdit = (q) => {
   isEditing.value = true;
   editingId.value = q.id;
@@ -315,20 +356,16 @@ const initEdit = (q) => {
   tempUploadedImages.value = {};
   for(const k in imageSizes) delete imageSizes[k];
   
-  // 1. 定义还原函数：把 HTML 转回 [标签]
   const restoreTags = (str) => {
       if (!str) return '';
       let s = str;
-      // 还原缩进
       s = s.replace(/<div style="text-indent: 2em;">(.*?)<\/div>/g, '[缩进]$1');
-      // 还原居中
       s = s.replace(/<div style="text-align: center; font-weight: bold;">(.*?)<\/div>/g, '[居中]$1');
       return s;
   };
 
   let regionStr = q.province || ''; 
 
-  // 2. 拼接文本时调用 restoreTags
   let text = `##年份 ${q.year || ''}
 ##地区 ${regionStr}
 ##来源 ${q.source || ''}
@@ -341,21 +378,17 @@ const initEdit = (q) => {
 ${restoreTags(q.title || '')}
 `;
   
-  // 回显小题逻辑
   if (q.subQuestions && q.subQuestions.length > 0) {
       q.subQuestions.forEach((sq, idx) => {
           text += `##小题\n${restoreTags(sq.content || '')}\n`;
-          
           if (sq.options && Object.keys(sq.options).length > 0) {
               text += `##选项 ${sq.optionLayout || 4}\n`;
               Object.keys(sq.options).sort().forEach(k => {
-                  text += `${k}.${sq.options[k]}\n`; // 选项内部通常不缩进，但也可用 restoreTags
+                  text += `${k}.${sq.options[k]}\n`;
               });
           }
-
           if (sq.tags && sq.tags.length) text += `##小题标签 ${sq.tags.join('/')}\n`;
       });
-      // 小题模式下，统一在最后添加答案等
       text += `##答案 \n${restoreTags(q.answer || '')}\n##分析 \n${restoreTags(q.analysis || '')}\n##详解 \n${restoreTags(q.detailed || '')}\n`;
   } else if (q.type && q.type.includes('选')) {
       text += `##选项 ${q.optionLayout || 4}\n`; 
@@ -382,10 +415,8 @@ ${restoreTags(q.title || '')}
 
       if (url.startsWith('http') || url.startsWith('blob')) {
           const tempId = `IMG_${imgCounter++}`;
-          
           tempUploadedImages.value[tempId] = url;
           imageSizes[tempId] = width ? parseInt(width) : 100;
-          
           let newTag = `[img:${tempId}`;
           if (align) newTag += `:${align}`;
           else if (width) newTag += `:l`; 
@@ -569,35 +600,84 @@ const parseTemplate = () => {
   else if (firstRegionErr) highlightError(firstRegionErr.start, firstRegionErr.end, firstRegionErr.msg);
 };
 
-const processSubOptions = (subQ) => {
-    if (!subQ.rawOptionLines || subQ.rawOptionLines.length === 0) {
-        subQ.options = {};
-        subQ.optionRows = [];
-        return;
-    }
-    let optFullText = subQ.rawOptionLines.join('\n');
-    optFullText = optFullText.replace(/\[img:([^\]]+)\]/g, (match, inner) => {
-         const parts = inner.split(':'); let w=null, a=null;
-         if(parts.length>1 && /^\d+$/.test(parts[parts.length-1])) w=parts.pop();
-         if(parts.length>1 && /^[lmr]$/.test(parts[parts.length-1])) a=parts.pop();
-         const id = parts.join(':'); const url = tempUploadedImages.value[id];
-         return url ? `[img:${url}:${a||'l'}:${w||''}]` : match;
+// 1. 通用图片处理：ID -> URL
+const replaceImages = (text) => {
+    if (!text) return '';
+    return text.replace(/\[img:([^\]]+)\]/g, (match, innerContent) => {
+        const parts = innerContent.split(':');
+        let width = null; let align = null;
+        if (parts.length > 1 && /^\d+$/.test(parts[parts.length - 1])) width = parts.pop();
+        if (parts.length > 1 && /^[lmr]$/.test(parts[parts.length - 1])) align = parts.pop();
+        const id = parts.join(':');
+        const url = tempUploadedImages.value[id];
+        if (url) {
+            let newTag = `[img:${url}`;
+            if (align) newTag += `:${align}`; else if (width) newTag += `:l`; 
+            if (width) newTag += `:${width}`;
+            newTag += `]`;
+            return newTag;
+        }
+        return match; 
     });
+};
 
+// 2. 安全选项解析：先切分文本，后替换图片
+const safeProcessOptions = (rawLines, layout = 4) => {
+    if (!rawLines || rawLines.length === 0) return { options: {}, rows: [] };
+    
+    let optFullText = rawLines.join('\n');
     const rawOptions = [];
     const parts = optFullText.split(/([A-Z][.、])/).filter(x=>x && x.trim());
-    subQ.options = {};
+    const optionsMap = {};
+
     for(let i=0; i<parts.length; i+=2) {
         if(i+1 < parts.length) {
             const k = parts[i].replace(/[.、]/, '').trim();
-            const v = parts[i+1].trim();
+            let v = parts[i+1].trim();
+            v = replaceImages(v);
             rawOptions.push({ key: k, value: v });
-            subQ.options[k] = v;
+            optionsMap[k] = v;
         }
     }
-    subQ.optionRows = distributeOptions(rawOptions, subQ.optionLayout || 4);
+    return {
+        options: optionsMap,
+        rows: distributeOptions(rawOptions, layout)
+    };
 };
 
+// 3. 纯正则 HTML 表格转 Markdown 工具函数
+const convertHtmlTableToMarkdown = (text) => {
+    if (!text) return '';
+    return text.replace(/<table[^>]*>([\s\S]*?)<\/table>/gi, (match, tableContent) => {
+        try {
+            const rows = tableContent.match(/<tr[^>]*>([\s\S]*?)<\/tr>/gi);
+            if (!rows || rows.length === 0) return match;
+
+            const grid = rows.map(tr => {
+                const cells = tr.match(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi) || [];
+                return cells.map(cell => cell.replace(/<[^>]+>/g, '').trim().replace(/\n/g, ' '));
+            });
+
+            if (grid.length === 0) return match;
+
+            let md = '\n';
+            const colCount = grid[0].length;
+            md += '| ' + grid[0].join(' | ') + ' |\n';
+            md += '| ' + Array(colCount).fill('---').join(' | ') + ' |\n';
+            for (let i = 1; i < grid.length; i++) {
+                const row = grid[i];
+                while (row.length < colCount) row.push(''); 
+                md += '| ' + row.join(' | ') + ' |\n';
+            }
+            return md + '\n';
+        } catch (e) {
+            console.error('Table convert error:', e);
+            return match; 
+        }
+    });
+};
+
+// 4. 完整的单个块解析逻辑
 const parseSingleChunk = (chunkText, chunkStartOffset = 0) => {
     const lines = chunkText.split('\n');
     const result = {};
@@ -618,7 +698,10 @@ const parseSingleChunk = (chunkText, chunkStartOffset = 0) => {
 
     const pushCurrentSubQ = () => {
         if (currentSubQ) {
-            processSubOptions(currentSubQ); 
+            currentSubQ.content = replaceImages(currentSubQ.content);
+            const optResult = safeProcessOptions(currentSubQ.rawOptionLines, currentSubQ.optionLayout);
+            currentSubQ.options = optResult.options;
+            currentSubQ.optionRows = optResult.rows;
             delete currentSubQ.rawOptionLines;
             qData.subQuestions.push(currentSubQ);
         }
@@ -647,7 +730,6 @@ const parseSingleChunk = (chunkText, chunkStartOffset = 0) => {
             }
             if (currentSubQ && moduleName === '选项') {
                 if (content && /^\d+$/.test(content)) currentSubQ.optionLayout = parseInt(content);
-                // [修改] 确保 currentModule 设置正确，以便后续非 header 行能被添加到 rawOptionLines
                 currentModule = '小题_选项';
                 charCount += lineLen;
                 return;
@@ -681,20 +763,15 @@ const parseSingleChunk = (chunkText, chunkStartOffset = 0) => {
             
             currentModule = moduleName;
             
-            // [修改] 遇到答案、分析、详解时，强制切回主题目上下文，不再归属于小题
             if (['答案', '分析', '详解'].includes(moduleName)) {
                  pushCurrentSubQ(); 
-                 currentSubQ = null; // 退出小题模式
-                 // 如果内容不为空，直接添加到主对象
+                 currentSubQ = null; 
                  if (content) {
                      const key = moduleName === '详解' ? 'detailed' : (moduleName === '分析' ? 'analysis' : 'answer');
                      qData[key] = content;
                  }
-                 // 标记当前模块，以便后续行添加
                  currentModule = moduleName; 
             } else if (currentSubQ) {
-                 // 其他小题相关模块 (如小题标签) 保持在小题内
-                 // ... (此处逻辑已在上方处理)
             } else {
                  if (!result[currentModule]) result[currentModule] = [];
                  if (content) result[currentModule].push(content);
@@ -708,12 +785,9 @@ const parseSingleChunk = (chunkText, chunkStartOffset = 0) => {
             if (currentSubQ) {
                 if (currentModule === '小题内容') currentSubQ.content += processedLine + '\n';
                 else if (currentModule === '小题_选项') currentSubQ.rawOptionLines.push(processedLine);
-                // 小题不再单独解析 答案/分析/详解
             } else {
-                // [修改] 处理主对象的答案/分析/详解多行内容
                 if (['答案', '分析', '详解'].includes(currentModule)) {
                     const key = currentModule === '详解' ? 'detailed' : (currentModule === '分析' ? 'analysis' : 'answer');
-                    // 如果该字段已有内容（来自header行），先加换行
                     if (qData[key] && !qData[key].endsWith('\n')) qData[key] += '\n';
                     qData[key] += processedLine + '\n';
                 }
@@ -731,27 +805,16 @@ const parseSingleChunk = (chunkText, chunkStartOffset = 0) => {
     const getVal = (key) => {
         if (!result[key]) return '';
         const rawStr = result[key].join(multiLineModules.includes(key) ? '\n' : '/');
-        return rawStr.replace(/\[img:([^\]]+)\]/g, (match, innerContent) => {
-            const parts = innerContent.split(':');
-            let width = null; let align = null;
-            if (parts.length > 1 && /^\d+$/.test(parts[parts.length - 1])) width = parts.pop();
-            if (parts.length > 1 && /^[lmr]$/.test(parts[parts.length - 1])) align = parts.pop();
-            const id = parts.join(':');
-            const url = tempUploadedImages.value[id];
-            if (url) {
-                let newTag = `[img:${url}`;
-                if (align) newTag += `:${align}`; else if (width) newTag += `:l`; 
-                if (width) newTag += `:${width}`;
-                newTag += `]`;
-                return newTag;
-            }
-            return match; 
-        });
+        return replaceImages(rawStr); 
     };
 
     qData.year = getVal('年份'); qData.source = getVal('来源'); qData.qNumber = getVal('题号');
     qData.difficulty = parseInt(getVal('难度')) || 3; qData.type = getVal('题型') || '单选题';
     qData.title = getVal('题干'); qData.region = qData.province; 
+
+    qData.answer = replaceImages(qData.answer);
+    qData.analysis = replaceImages(qData.analysis);
+    qData.detailed = replaceImages(qData.detailed);
 
     const kpRaw = getVal('知识点');
     qData.categoryIds = kpRaw ? kpRaw.split('/').map(n=>props.knowledgeList.find(l=>l.title===n.trim())?.id).filter(x=>x) : [];
@@ -771,31 +834,12 @@ const parseSingleChunk = (chunkText, chunkStartOffset = 0) => {
         let targetCols = 4; let startIdx = 0;
         if (optLines.length > 0 && /^\d+$/.test(optLines[0].trim())) { targetCols = parseInt(optLines[0].trim()); startIdx = 1; }
         
-        let optFullText = optLines.slice(startIdx).join('\n');
-        optFullText = optFullText.replace(/\[img:([^\]]+)\]/g, (match, inner) => {
-             const parts = inner.split(':'); let w=null, a=null;
-             if(parts.length>1 && /^\d+$/.test(parts[parts.length-1])) w=parts.pop();
-             if(parts.length>1 && /^[lmr]$/.test(parts[parts.length-1])) a=parts.pop();
-             const id = parts.join(':'); const url = tempUploadedImages.value[id];
-             return url ? `[img:${url}:${a||'l'}:${w||''}]` : match;
-        });
-
-        const rawOptions = [];
-        const parts = optFullText.split(/([A-Z][.、])/).filter(x=>x && x.trim());
-        for(let i=0; i<parts.length; i+=2) {
-            if(i+1 < parts.length) {
-                const k = parts[i].replace(/[.、]/, '').trim();
-                const v = parts[i+1].trim();
-                rawOptions.push({ key: k, value: v });
-                qData.options[k] = v;
-            }
-        }
+        const rawOptLines = optLines.slice(startIdx);
+        const optResult = safeProcessOptions(rawOptLines, targetCols);
+        qData.options = optResult.options;
         qData.optionLayout = targetCols;
-        qData.optionRows = distributeOptions(rawOptions, targetCols);
+        qData.optionRows = optResult.rows;
     } else { qData.options = {}; qData.optionRows = []; }
-
-    // [修改] 移除这里对 qData.answer/analysis/detailed 的覆盖赋值，因为现在它们已经在循环中直接解析了
-    // qData.analysis = getVal('分析'); qData.answer = getVal('答案'); qData.detailed = getVal('详解');
     
     return qData;
 };
@@ -945,6 +989,136 @@ const handleSave = async () => {
 };
 const getKnowledgeTags = (ids) => ids.map(id => props.knowledgeList.find(l => l.id === id) || {id, title:id}).filter(x=>x);
 const selectPreviewItem = (idx) => { currentPreviewIdx.value = idx; };
+
+// === OCR 逻辑部分 (增强版V2) ===
+const openOCRModal = () => { 
+    showOCRModal.value = true; 
+    ocrResult.value = ''; 
+    ocrLoading.value = false; 
+    // 监听全局粘贴事件，只在 OCR 弹窗打开时生效
+    window.addEventListener('paste', handleOCRPaste);
+};
+const closeOCRModal = () => { 
+    showOCRModal.value = false; 
+    window.removeEventListener('paste', handleOCRPaste);
+};
+
+// [核心修改] 支持 File 对象和路径的通用上传函数
+const uploadOCRFile = (fileOrPath) => {
+    ocrLoading.value = true;
+    
+    const uploadOptions = {
+        url: baseUrl + '/api/smart-ocr',
+        name: 'file',
+        header: { 'Authorization': 'Bearer ' + (uni.getStorageSync('token') || '') },
+        success: (res) => {
+            try {
+                // 部分平台 res.data 可能是字符串
+                const data = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
+                if (data.error) throw new Error(data.error);
+                
+                if (data.images) {
+                    tempUploadedImages.value = { ...tempUploadedImages.value, ...data.images };
+                    Object.keys(data.images).forEach(k => imageSizes[k] = 80);
+                }
+                
+                let processedContent = data.content;
+                processedContent = convertHtmlTableToMarkdown(processedContent);
+                
+                ocrResult.value = processedContent;
+                uni.showToast({ title: '识别成功', icon: 'success' });
+            } catch (e) {
+                uni.showToast({ title: '失败: ' + e.message, icon: 'none', duration: 3000 });
+                console.error(e);
+            }
+        },
+        fail: (err) => { 
+            console.error('OCR上传失败:', err);
+            uni.showToast({ title: '网络错误: ' + (err.errMsg || '无法连接服务器'), icon: 'none', duration: 3000 }); 
+        },
+        complete: () => { ocrLoading.value = false; }
+    };
+
+    console.log('开始OCR上传, Options:', uploadOptions);
+
+    // 智能判断参数类型
+    // [修复] H5端优先使用 Blob URL 传参，解决 uploadFile:fail file error
+    if (fileOrPath instanceof File || (fileOrPath.raw && fileOrPath.raw instanceof File)) {
+        try {
+            uploadOptions.filePath = window.URL.createObjectURL(fileOrPath);
+            uploadOptions.file = null; // 明确清空 file 字段，强制使用 filePath
+        } catch (e) {
+            console.error('Blob URL creation failed, falling back to File object', e);
+            uploadOptions.file = fileOrPath;
+        }
+    } else if (typeof fileOrPath === 'string') {
+        uploadOptions.filePath = fileOrPath; // 路径字符串
+    } else if (fileOrPath.path) {
+        uploadOptions.filePath = fileOrPath.path; // 小程序文件对象
+    } else {
+        // 兜底：尝试转为 Blob URL
+        try { uploadOptions.filePath = window.URL.createObjectURL(fileOrPath); } 
+        catch(e) { console.error('无效的文件对象', e); }
+    }
+
+    console.log('Final Upload Options:', uploadOptions);
+    uni.uploadFile(uploadOptions);
+};
+
+// [修改] 点击上传：使用 uni.chooseFile，兼容 H5 和小程序
+const chooseOCRFile = () => {
+    uni.chooseFile({
+        count: 1,
+        extension: ['.pdf', '.jpg', '.jpeg', '.png', '.bmp', '.webp'],
+        success: (res) => {
+            if (res.tempFiles.length > 0) {
+                const file = res.tempFiles[0];
+                // H5端 file 是 File 对象，直接传给 uploadOCRFile
+                // 小程序端 file 是对象包含 path
+                uploadOCRFile(file); 
+            }
+        },
+        fail: (err) => {
+            console.error('选择文件失败', err);
+        }
+    });
+};
+
+// [修改] 粘贴：放宽类型限制，支持任意文件
+const handleOCRPaste = (e) => {
+    if (!showOCRModal.value) return; // 只有弹窗打开才处理
+    const items = e.clipboardData && e.clipboardData.items;
+    if (items) {
+        for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            // 只要是文件类型 (kind='file') 就尝试上传，不再局限于 type 包含 'image'
+            if (item.kind === 'file') {
+                const blob = item.getAsFile();
+                if (blob) {
+                    uploadOCRFile(blob);
+                    e.preventDefault(); 
+                    return;
+                }
+            }
+        }
+    }
+};
+
+// [修改] 拖拽：直接获取 files 并上传
+const handleOCRDrop = (e) => {
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+        uploadOCRFile(files[0]);
+    }
+};
+
+const copyOCRResult = () => {
+    uni.setClipboardData({
+        data: ocrResult.value,
+        success: () => uni.showToast({ title: '已复制', icon: 'none' })
+    });
+};
+
 defineExpose({ open });
 </script>
 
@@ -1044,4 +1218,29 @@ defineExpose({ open });
 .slider-box { flex: 1; display: flex; align-items: center; gap: 5px; }
 .size-slider { flex: 1; height: 20px; cursor: pointer; }
 .size-val { font-size: 11px; color: #2563eb; font-weight: bold; width: 35px; text-align: right; }
+
+/* OCR Modal Styles */
+.ocr-body { padding: 20px; height: 500px; display: flex; flex-direction: column; outline: none; }
+.upload-zone {
+    flex: 1; border: 2px dashed #cbd5e1; border-radius: 12px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: #f8fafc; cursor: pointer; transition: all 0.2s;
+}
+.upload-zone:hover { border-color: #7c3aed; background: #f5f3ff; }
+
+.loading-zone { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.spinner {
+    width: 40px; height: 40px; border: 4px solid #e2e8f0;
+    border-top: 4px solid #2563eb; border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+.result-zone { flex: 1; display: flex; flex-direction: column; }
+.result-tip { font-size: 13px; color: #166534; background: #dcfce7; padding: 10px; border-radius: 6px; margin-bottom: 10px; display: flex; justify-content: space-between; }
+.copy-link { color: #2563eb; font-weight: bold; cursor: pointer; text-decoration: underline; }
+.result-editor {
+    flex: 1; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px;
+    font-family: monospace; font-size: 14px; line-height: 1.6; resize: none; background: #fff;
+}
 </style>

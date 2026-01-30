@@ -30,13 +30,52 @@
       <view class="modal-body">
         
         <view class="col col-source">
-          <view class="col-title">LaTeX 源码</view>
+          <view class="col-title tab-header">
+            <view 
+              class="tab-item" 
+              :class="{ active: viewMode === 'code' }"
+              @click="viewMode = 'code'"
+            >
+              LaTeX 源码
+            </view>
+            <view class="divider">|</view>
+            <view 
+              class="tab-item" 
+              :class="{ active: viewMode === 'preview' }"
+              @click="handleCompile"
+            >
+              <text v-if="isCompiling">⏳ 编译中...</text>
+              <text v-else>👁️ 编译预览</text>
+            </view>
+          </view>
+
           <textarea 
+            v-show="viewMode === 'code'"
             class="source-editor" 
             v-model="sourceCode" 
             maxlength="-1" 
             placeholder="在此输入 LaTeX 源码..."
           ></textarea>
+
+          <view v-show="viewMode === 'preview'" class="pdf-preview-container">
+            <iframe 
+              v-if="pdfUrl" 
+              :src="pdfUrl" 
+              class="pdf-frame" 
+              frameborder="0"
+            ></iframe>
+            
+            <view v-else class="preview-placeholder">
+              <text v-if="isCompiling" class="loading-text">正在调用本地 TeX 引擎生成中...</text>
+              <view v-else-if="compileError" class="error-box">
+                <text class="error-title">❌ 编译失败</text>
+                <scroll-view scroll-y class="error-log">
+                  <text>{{ compileError }}</text>
+                </scroll-view>
+              </view>
+              <text v-else>点击上方“编译预览”查看 PDF</text>
+            </view>
+          </view>
         </view>
 
         <view class="col col-settings">
@@ -114,9 +153,10 @@
 </template>
 
 <script setup>
-import { ref, reactive, watch } from 'vue';
+import { ref, reactive, watch, nextTick } from 'vue';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
+import { compilePaper } from '@/api/question.js'; // 引入编译 API
 
 const props = defineProps({
   visible: Boolean,
@@ -135,8 +175,14 @@ const isExporting = ref(false);
 const answerPos = ref('end');
 const selectedTplId = ref(1);
 
-// 图片资源映射表 { "save_filename.jpg": "http://download/url" }
+// 图片资源映射表
 let imageAssets = {};
+
+// [新增] 编译相关状态
+const viewMode = ref('code'); // 'code' | 'preview'
+const isCompiling = ref(false);
+const pdfUrl = ref('');
+const compileError = ref('');
 
 const metadata = reactive({
   source: false,
@@ -159,92 +205,108 @@ const templates = ref([
   { id: 4, name: "作业\n练习" }
 ]);
 
-/**
- * 🌟 核心兼容逻辑 🌟
- * 解决 404 的关键：
- * 1. 下载链接 (downloadUrl)：完全信任原始数据，如果原始是 http://.../123 (无后缀)，就请求这个。
- * 2. 保存文件名 (saveFilename)：强制加后缀，保证 ZIP 里是图片格式。
- */
+// 核心兼容逻辑：解决 404
 const resolveImageInfo = (rawUrl) => {
-  // 1. 清洗 URL (去掉 query 参数)
   const cleanUrl = rawUrl.split('?')[0];
-  
-  // 2. 获取原始文件名
-  let originalName = cleanUrl.split('/').pop(); // 例如 "123" 或 "456.jpg"
-  
-  // 3. 确定下载地址 (Download URL)
-  // 绝对不要瞎改 URL！数据库存什么就请求什么，否则后端 404
+  let originalName = cleanUrl.split('/').pop(); 
   const downloadUrl = rawUrl; 
-
-  // 4. 确定保存文件名 (Save Filename)
-  // 必须保证有后缀，否则 LaTeX 报错
   let saveFilename = originalName;
-  
-  // 如果原始名没有后缀，强行加 .jpg (兼容旧数据)
-  if (!saveFilename.includes('.')) {
-    saveFilename += '.jpg';
-  }
-
-  // 解码防止中文乱码
+  if (!saveFilename.includes('.')) { saveFilename += '.jpg'; }
   try { saveFilename = decodeURIComponent(saveFilename); } catch(e){}
-
   return { saveFilename, downloadUrl };
 };
 
 const convertContentToLatex = (text) => {
   if (!text) return '';
-  let latex = text;
+  
+  // 1. 分割文本和公式 (简单处理 $...$ )
+  // 偶数索引为文本，奇数索引为公式
+  const parts = text.split(/(\$[^$]*\$)/g);
 
-  // 处理自定义图片格式: [img:url:pos:scale]
-  const imgRegex = /\[img:(.*?):([lmr]):(\d+)\]/g;
-  latex = latex.replace(imgRegex, (match, rawUrl, pos, scale) => {
-    
-    // 调用兼容函数
-    const { saveFilename, downloadUrl } = resolveImageInfo(rawUrl);
-    
-    // 存入待下载列表: key=文件名(带后缀), value=下载地址(原始地址)
-    imageAssets[saveFilename] = downloadUrl;
+  const processedParts = parts.map((part, index) => {
+    if (index % 2 === 1) {
+      // --- 公式部分 ---
+      // 保持原样，不转义
+      return part;
+    } else {
+      // --- 文本部分 ---
+      let latex = part;
 
-    // 解析对齐方式
-    let alignCmd = '\\centering'; 
-    if (pos === 'l') alignCmd = '\\raggedright';
-    if (pos === 'r') alignCmd = '\\raggedleft';
+      // 1. 处理填空题下划线 (连续2个以上)
+      latex = latex.replace(/_{2,}/g, ' \\underline{\\hspace{2em}} ');
 
-    // 解析缩放
-    const widthVal = (parseInt(scale) / 100).toFixed(2);
+      // 2. 转义特殊字符 (不转义 _，交给 macro/package 处理，但要转义 & % #)
+      latex = latex.replace(/([&%#])/g, '\\$1');
+      latex = latex.replace(/\^/g, '\\textasciicircum ');
+      latex = latex.replace(/~/g, '\\textasciitilde ');
 
-    return `
-\\begin{figure}[H]
-  ${alignCmd}
-  \\includegraphics[width=${widthVal}\\linewidth]{images/${saveFilename}}
-\\end{figure}
-`;
+      // 3. 处理换行
+      // 将 HTML <br> 或 <p> 转换为 LaTeX 换行
+      latex = latex.replace(/<br\s*\/?>/gi, ' \\newline ');
+      latex = latex.replace(/<\/p>/gi, ' \\par ');
+      latex = latex.replace(/<p[^>]*>/gi, '');
+      // 处理普通文本中的换行符 (保留用户输入的换行结构)
+      latex = latex.replace(/\n/g, ' \\newline ');
+
+      // 4. 清理 HTML 标签
+      latex = latex.replace(/<[^>]+>/g, '');
+
+      // 5. HTML 实体
+      latex = latex.replace(/&nbsp;/g, ' ');
+      latex = latex.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+
+      // 6. 处理自定义图片格式 (内嵌，不使用 figure 环境)
+      // 预览区所见即所得：图片如果不换行，这里也不换行
+      const imgRegex = /\[img:(.*?):([lmr]):(\d+)\]/g;
+      latex = latex.replace(imgRegex, (match, rawUrl, pos, scale) => {
+        const { saveFilename, downloadUrl } = resolveImageInfo(rawUrl);
+        imageAssets[saveFilename] = downloadUrl;
+        
+        // 缩放比例
+        const widthVal = (parseInt(scale) / 100).toFixed(2);
+        
+        // 直接插入图片，不带任何位置环境，跟随文本流
+        // 使用 raisebox 垂直居中对齐 (0.5\height 使图片中心对齐基线，实际上通常需要微调，但这是通用做法)
+        return `\\raisebox{-0.5\\height}{\\includegraphics[width=${widthVal}\\linewidth]{images/${saveFilename}}}`;
+      });
+
+      return latex;
+    }
   });
 
-  // 处理 Markdown 表格 (保持原始逻辑不变)
+  let latex = processedParts.join('');
+
+  // 7. 处理 Markdown 表格 (全局处理，因为表格是块级元素)
+  // 简易逻辑：识别被 \newline 分隔的行，如果看起来像表格则转换
+  // 注意：上面的 \n 已经被替换为 \newline
   if (latex.includes('|')) {
-    const lines = latex.split('\n');
+    const lines = latex.split(/ \\newline | \\par /); // 根据刚才替换的换行符分割
     let inTable = false;
     let tableLines = [];
     let newLines = [];
 
     const processTable = (tLines) => {
+        // 过滤空行
         const contentLines = tLines.filter(l => !/^[\s|:-]+$/.test(l));
         if (contentLines.length === 0) return '';
-
-        const firstLine = contentLines[0];
-        const cols = firstLine.split('|').filter(s => s.trim() !== '').length;
-        if (cols === 0) return '';
         
-        const colSpec = '|' + Array(cols).fill('X<{\\centering}').join('|') + '|';
+        // 确定列数
+        const firstLine = contentLines[0];
+        // 移除转义后的 \| 或普通 |
+        const cols = firstLine.split('|').filter(s => s && s.trim() !== '').length;
+        if (cols === 0) return tLines.join(' \\newline ');
 
+        const colSpec = '|' + Array(cols).fill('X<{\\centering}').join('|') + '|';
         let tableBody = '';
+        
         contentLines.forEach(row => {
             const cells = row.split('|');
             const cleanCells = cells.filter((c, i) => {
-                 if ((i === 0 || i === cells.length - 1) && c.trim() === '') return false;
+                 // 过滤首尾的空分割
+                 if ((i === 0 || i === cells.length - 1) && (!c || c.trim() === '')) return false;
                  return true;
             });
+            // 单元格之间用 & 连接
             const latexCells = cleanCells.map(c => c.trim()).join(' & ');
             tableBody += `      ${latexCells} \\\\ \\hline\n`;
         });
@@ -261,6 +323,7 @@ ${tableBody}  \\end{tabularx}
 
     lines.forEach(line => {
         const trimmed = line.trim();
+        // 简单的表格行判断：以 | 开头并以 | 结尾 (忽略转义符检查，简化处理)
         if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
             if (!inTable) inTable = true;
             tableLines.push(trimmed);
@@ -273,19 +336,12 @@ ${tableBody}  \\end{tabularx}
             newLines.push(line);
         }
     });
-    if (inTable) {
-        newLines.push(processTable(tableLines));
-    }
+    if (inTable) { newLines.push(processTable(tableLines)); }
     
-    latex = newLines.join('\n');
+    // 重新组合，使用 \n 连接，因为表格环境本身是块级的
+    latex = newLines.join('\n'); 
   }
 
-  // 基础清洗
-  latex = latex.replace(/&nbsp;/g, ' ');
-  latex = latex.replace(/<br\s*\/?>/g, ' \\\\\n');
-  latex = latex.replace(/<p[^>]*>/g, '\n\n').replace(/<\/p>/g, '');
-  latex = latex.replace(/<[^>]+>/g, '');
-  
   return latex;
 };
 
@@ -302,9 +358,12 @@ const generateLatex = () => {
 \\usepackage{booktabs}
 \\usepackage{tabularx}
 \\usepackage{array}
+\\usepackage{underscore}
+\\usepackage{enumitem}
 
 \\setlength{\\parindent}{0pt}
 \\setlength{\\parskip}{1em}
+\\setlength{\\fboxrule}{0pt} % 移除图片边框
 
 \\title{数学测试试卷}
 \\author{}
@@ -323,22 +382,66 @@ const generateLatex = () => {
   } else {
     props.questions.forEach((q, index) => {
       const qTitle = convertContentToLatex(q.title || '');
-      
       content += `\\paragraph{第 ${index + 1} 题} \n`;
       content += `${qTitle}\n`;
-      
-      if (q.options) {
-          content += `\\begin{itemize}\n`;
-          Object.keys(q.options).forEach(key => {
-              const optContent = convertContentToLatex(q.options[key]);
-              content += `  \\item[${key}.] ${optContent}\n`;
+
+      // 处理小题
+      if (q.subQuestions && q.subQuestions.length > 0) {
+          q.subQuestions.forEach((subQ, idx) => {
+              const subContent = convertContentToLatex(subQ.content || '');
+              // [修改] 移除自动编号 (${idx+1})，仅输出内容 + 换行
+              content += `${subContent} \\par\n`; 
+              
+              // 小题选项
+              if (subQ.options && Object.keys(subQ.options).length > 0) {
+                  const validKeys = Object.keys(subQ.options).filter(k => subQ.options[k] && subQ.options[k].trim() !== '');
+                  if (validKeys.length > 0) {
+                      content += `    \\begin{itemize}[nosep, topsep=0pt]\n`;
+                      validKeys.forEach(key => {
+                          const optContent = convertContentToLatex(subQ.options[key]);
+                          content += `      \\item[${key}.] ${optContent}\n`;
+                      });
+                      content += `    \\end{itemize}\n`;
+                  }
+              }
           });
-          content += `\\end{itemize}\n`;
+      }  
+      // 处理主题选项 (如果没小题)
+      else if (q.options && Object.keys(q.options).length > 0) {
+          const validKeys = Object.keys(q.options).filter(k => q.options[k] && q.options[k].trim() !== '');
+          if (validKeys.length > 0) {
+              content += `\\begin{itemize}[nosep, topsep=0pt]\n`;
+              validKeys.forEach(key => {
+                  const optContent = convertContentToLatex(q.options[key]);
+                  content += `  \\item[${key}.] ${optContent}\n`;
+              });
+              content += `\\end{itemize}\n`;
+          }
       }
-      
+
       if (answerPos.value === 'question') {
-         const qAns = convertContentToLatex(q.answer || '略');
-         content += `\\vspace{0.5cm}\\textbf{【答案】} ${qAns} \\\\\n`;
+         // 答案部分也要处理小题
+         let qAns = '';
+         let qAnalysis = '';
+         let qDetailed = '';
+
+         if (q.subQuestions && q.subQuestions.length > 0) {
+             q.subQuestions.forEach((subQ, idx) => {
+                 // [修改] 移除自动编号
+                 qAns += convertContentToLatex(subQ.answer || '略') + ' ';
+                 if (subQ.analysis) qAnalysis += convertContentToLatex(subQ.analysis) + ' ';
+                 if (subQ.detailed) qDetailed += convertContentToLatex(subQ.detailed) + ' ';
+             });
+         } else {
+             qAns = convertContentToLatex(q.answer || '略');
+             qAnalysis = convertContentToLatex(q.analysis || '');
+             qDetailed = convertContentToLatex(q.detailed || '');
+         }
+         
+         content += `\\vspace{0.5cm}\\textbf{【答案】} ${qAns} \\par\n`;
+         if (qAnalysis) content += `\\textbf{【解析】} ${qAnalysis} \\par\n`;
+         if (qDetailed) content += `\\textbf{【详解】} ${qDetailed} \\par\n`;
+         
          content += `\\vspace{0.5cm}\\hrule\\vspace{0.5cm}\n`;
       } else {
          content += `\\vspace{1cm}\n`;
@@ -349,8 +452,27 @@ const generateLatex = () => {
   if (answerPos.value === 'end' && props.questions && props.questions.length > 0) {
       content += `\\newpage\n\\section*{二、参考答案}\n`;
       props.questions.forEach((q, index) => {
-          const qAns = convertContentToLatex(q.answer || '略');
-          content += `\\textbf{${index + 1}.} ${qAns} \\\\\n`;
+          let qAns = '';
+          let qAnalysis = '';
+          let qDetailed = '';
+
+          if (q.subQuestions && q.subQuestions.length > 0) {
+             q.subQuestions.forEach((subQ, idx) => {
+                 // [修改] 移除自动编号
+                 qAns += convertContentToLatex(subQ.answer || '略') + '\\\\ '; 
+                 if (subQ.analysis) qAnalysis += convertContentToLatex(subQ.analysis) + '\\\\ ';
+                 if (subQ.detailed) qDetailed += convertContentToLatex(subQ.detailed) + '\\\\ ';
+             });
+          } else {
+             qAns = convertContentToLatex(q.answer || '略');
+             qAnalysis = convertContentToLatex(q.analysis || '');
+             qDetailed = convertContentToLatex(q.detailed || '');
+          }
+          
+          content += `\\paragraph{第 ${index + 1} 题}\n`;
+          content += `\\textbf{【答案】} ${qAns} \\par\n`;
+          if (qAnalysis) content += `\\textbf{【解析】} ${qAnalysis} \\par\n`;
+          if (qDetailed) content += `\\textbf{【详解】} ${qDetailed} \\par\n`;
       });
   }
 
@@ -358,60 +480,72 @@ const generateLatex = () => {
   sourceCode.value = content;
 };
 
-// --- 导出逻辑 (修复了 Loading 配对问题) ---
+// [新增] 编译处理函数
+// [修改] 编译处理函数
+const handleCompile = async () => {
+  viewMode.value = 'preview';
+  
+  await nextTick(); // 确保 v-model 更新
+
+  if (isCompiling.value || !sourceCode.value) return;
+
+  isCompiling.value = true;
+  compileError.value = '';
+
+  try {
+    // 关键修改：传入 imageAssets
+    // 这个对象里存了 { "1.jpg": "http://.../1.jpg" } 这样的映射关系
+    const res = await compilePaper(sourceCode.value, imageAssets);
+    if (res.url) {
+      pdfUrl.value = res.url + '?t=' + Date.now();
+    }
+  } catch (err) {
+    console.error('编译失败:', err);
+    const errorMsg = err.log || err.error || '未知错误';
+    compileError.value = errorMsg;
+  } finally {
+    isCompiling.value = false;
+  }
+};
+
 const handleExport = async () => {
   if (isExporting.value) return;
-  
   isExporting.value = true;
   uni.showLoading({ title: '打包资源中...', mask: true });
 
   try {
     const zip = new JSZip();
     zip.file("paper.tex", sourceCode.value);
-
     const imgFolder = zip.folder("images");
     const assetEntries = Object.entries(imageAssets);
     
     if (assetEntries.length > 0) {
-        console.log(`准备下载 ${assetEntries.length} 张图片...`);
-        
         const downloadPromises = assetEntries.map(async ([saveFilename, downloadUrl]) => {
           try {
-            console.log(`下载: ${downloadUrl} -> 保存为: ${saveFilename}`);
-            
-            // 使用原始 URL 下载
             const res = await uni.request({
               url: downloadUrl,
               method: 'GET',
               responseType: 'arraybuffer'
             });
-            
             if (res.statusCode === 200) {
               imgFolder.file(saveFilename, res.data);
             } else {
-              console.error(`Status Error ${res.statusCode}: ${downloadUrl}`);
               imgFolder.file(saveFilename + "_error.txt", `HTTP ${res.statusCode}`);
             }
           } catch (e) {
-            console.error(`Network Error:`, e);
             imgFolder.file(saveFilename + "_error.txt", "Net Error");
           }
         });
-
         await Promise.all(downloadPromises);
     }
 
     const content = await zip.generateAsync({ type: "blob" });
     saveAs(content, "latex_paper_export.zip");
-    
     uni.showToast({ title: '导出成功', icon: 'success' });
     emit('export');
-    
   } catch (error) {
-    console.error('Export failed:', error);
     uni.showToast({ title: '导出失败', icon: 'none' });
   } finally {
-    // 确保 Loading 只关闭一次，解决控制台警告
     if (isExporting.value) {
         uni.hideLoading();
         isExporting.value = false;
@@ -424,34 +558,23 @@ watch(() => props.visible, (newVal) => {
 });
 
 watch(() => props.questions, () => {
-    if (props.visible) generateLatex();
+    if (props.visible) {
+        generateLatex();
+        pdfUrl.value = ''; // 数据变更，重置PDF
+        viewMode.value = 'code';
+    }
 }, { deep: true });
 
 watch(answerPos, generateLatex);
 
-const close = () => {
-  emit('update:visible', false);
-};
-
-const setMode = (m) => {
-  mode.value = m;
-};
-
-const toggleMeta = (key) => {
-  metadata[key] = !metadata[key];
-};
-
-const selectTemplate = (tpl) => {
-  selectedTplId.value = tpl.id;
-};
-
-const uploadTemplate = () => {
-  uni.showToast({ title: '上传功能待开发', icon: 'none' });
-};
+const close = () => { emit('update:visible', false); };
+const setMode = (m) => { mode.value = m; };
+const toggleMeta = (key) => { metadata[key] = !metadata[key]; };
+const selectTemplate = (tpl) => { selectedTplId.value = tpl.id; };
+const uploadTemplate = () => { uni.showToast({ title: '上传功能待开发', icon: 'none' }); };
 </script>
 
 <style lang="scss" scoped>
-/* 样式已完全恢复为第一次提供的原版 */
 .export-modal-container {
   font-family: "Times New Roman", "Songti SC", "SimSun", serif;
 }
@@ -552,17 +675,51 @@ const uploadTemplate = () => {
   overflow: hidden;
 }
 
+/* [新增/修改] 标题样式，支持 Tab */
 .col-title {
   height: 40px;
   background: #F9FAFB;
   border-bottom: 1px solid #E5E7EB;
   display: flex;
   align-items: center;
-  padding: 0 16px;
   font-size: 14px;
   font-weight: bold;
   color: #374151;
   flex-shrink: 0;
+  
+  &.tab-header {
+    justify-content: flex-start;
+    padding: 0;
+    
+    .tab-item {
+      height: 100%;
+      padding: 0 20px;
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+      color: #6B7280;
+      transition: all 0.2s;
+      
+      &:hover { background: #F3F4F6; }
+      
+      &.active {
+        color: #3B82F6;
+        font-weight: bold;
+        background: #FFFFFF;
+        position: relative;
+        &::after {
+          content: '';
+          position: absolute;
+          bottom: 0;
+          left: 0;
+          width: 100%;
+          height: 2px;
+          background: #3B82F6;
+        }
+      }
+    }
+    .divider { color: #E5E7EB; margin: 0 5px; font-weight: normal; }
+  }
 }
 
 .col-source {
@@ -584,6 +741,59 @@ const uploadTemplate = () => {
   }
 }
 
+/* [新增] PDF 预览样式 */
+.pdf-preview-container {
+  flex: 1;
+  width: 100%;
+  height: 0;
+  background: #E5E7EB;
+  position: relative;
+  
+  .pdf-frame {
+    width: 100%;
+    height: 100%;
+    background: #fff;
+  }
+  
+  .preview-placeholder {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    color: #6B7280;
+    
+    .loading-text { color: #3B82F6; font-weight: bold; }
+    
+    .error-box {
+      width: 90%;
+      height: 80%;
+      background: #FEF2F2;
+      border: 1px solid #FECACA;
+      border-radius: 6px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      
+      .error-title {
+        color: #DC2626;
+        font-weight: bold;
+        margin-bottom: 8px;
+      }
+      .error-log {
+        flex: 1;
+        height: 0;
+        font-family: monospace;
+        font-size: 12px;
+        color: #7F1D1D;
+        white-space: pre-wrap;
+      }
+    }
+  }
+}
+
 .col-settings {
   width: 300px;
   
@@ -593,160 +803,48 @@ const uploadTemplate = () => {
     box-sizing: border-box;
   }
   
-  .setting-group {
-    margin-bottom: 24px;
-    
-    .group-label {
-      font-size: 13px;
-      font-weight: bold;
-      color: #374151;
-      margin-bottom: 12px;
-      display: block;
-    }
-  }
+  .setting-group { margin-bottom: 24px; }
+  .group-label { font-size: 13px; font-weight: bold; color: #374151; margin-bottom: 12px; display: block; }
   
   .checkbox-list {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    
+    display: flex; flex-direction: column; gap: 10px;
     .cb-item {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      cursor: pointer;
-      
+      display: flex; align-items: center; gap: 8px; cursor: pointer;
       .cb-box {
-        width: 16px;
-        height: 16px;
-        border: 1px solid #D1D5DB;
-        border-radius: 4px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: #fff;
-        
-        &.checked {
-          background: #3B82F6;
-          border-color: #3B82F6;
-        }
-        
-        .check-mark {
-          font-size: 12px;
-          color: white;
-        }
+        width: 16px; height: 16px; border: 1px solid #D1D5DB; border-radius: 4px; display: flex; align-items: center; justify-content: center; background: #fff;
+        &.checked { background: #3B82F6; border-color: #3B82F6; }
+        .check-mark { font-size: 12px; color: white; }
       }
-      
-      .cb-label {
-        font-size: 14px;
-        color: #4B5563;
-      }
+      .cb-label { font-size: 14px; color: #4B5563; }
     }
   }
   
   .radio-list {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    
+    display: flex; flex-direction: column; gap: 10px;
     .radio-item {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      cursor: pointer;
-      
-      .radio-circle {
-        width: 16px;
-        height: 16px;
-        border: 1px solid #D1D5DB;
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: #fff;
-      }
-      
+      display: flex; align-items: center; gap: 8px; cursor: pointer;
+      .radio-circle { width: 16px; height: 16px; border: 1px solid #D1D5DB; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: #fff; }
       &.active {
-        .radio-circle {
-          border-color: #3B82F6;
-        }
-        .radio-dot {
-          width: 8px;
-          height: 8px;
-          background: #3B82F6;
-          border-radius: 50%;
-        }
+        .radio-circle { border-color: #3B82F6; }
+        .radio-dot { width: 8px; height: 8px; background: #3B82F6; border-radius: 50%; }
       }
-      
-      .radio-label {
-        font-size: 14px;
-        color: #4B5563;
-      }
+      .radio-label { font-size: 14px; color: #4B5563; }
     }
   }
   
   .template-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
-    
+    display: flex; flex-wrap: wrap; gap: 12px;
     .tpl-card {
-      width: 80px;
-      height: 110px;
-      background: #F9FAFB;
-      border: 1px solid #E5E7EB;
-      border-radius: 6px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding: 8px 4px;
-      box-sizing: border-box;
-      cursor: pointer;
-      transition: all 0.2s;
-      
+      width: 80px; height: 110px; background: #F9FAFB; border: 1px solid #E5E7EB; border-radius: 6px; display: flex; flex-direction: column; align-items: center; padding: 8px 4px; box-sizing: border-box; cursor: pointer; transition: all 0.2s;
       &.selected {
-        border-color: #3B82F6;
-        background: #EFF6FF;
-        box-shadow: 0 0 0 2px rgba(59,130,246,0.2);
-        
-        .tpl-name {
-          color: #1D4ED8;
-          font-weight: bold;
-        }
+        border-color: #3B82F6; background: #EFF6FF; box-shadow: 0 0 0 2px rgba(59,130,246,0.2);
+        .tpl-name { color: #1D4ED8; font-weight: bold; }
       }
-      
-      .tpl-thumb {
-        width: 40px;
-        height: 54px;
-        background: #fff;
-        border: 1px solid #E5E7EB;
-        margin-bottom: 8px;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-      }
-      
-      .tpl-name {
-        font-size: 12px;
-        color: #6B7280;
-        text-align: center;
-        line-height: 1.3;
-        white-space: pre-wrap;
-      }
-      
+      .tpl-thumb { width: 40px; height: 54px; background: #fff; border: 1px solid #E5E7EB; margin-bottom: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+      .tpl-name { font-size: 12px; color: #6B7280; text-align: center; line-height: 1.3; white-space: pre-wrap; }
       &.upload-card {
         justify-content: center;
-        
-        .upload-icon {
-          width: 28px;
-          height: 28px;
-          background: #E5E7EB;
-          border-radius: 50%;
-          color: #fff;
-          font-size: 20px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          margin-bottom: 8px;
-        }
+        .upload-icon { width: 28px; height: 28px; background: #E5E7EB; border-radius: 50%; color: #fff; font-size: 20px; display: flex; align-items: center; justify-content: center; margin-bottom: 8px; }
       }
     }
   }

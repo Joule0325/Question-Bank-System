@@ -48,7 +48,28 @@
                             <image :src="q.image" mode="widthFix" />
                         </view>
                         
-                        <view v-if="q.options && typeof q.options === 'object'" class="mc-opts" :style="'grid-template-columns: repeat('+(q.optionLayout||4)+',1fr)'">
+                        <view v-if="q.subQuestions && q.subQuestions.length > 0" class="mc-sub-list">
+                            <view v-for="(subQ, sIdx) in q.subQuestions" :key="sIdx" class="mc-sub-item">
+                                <view class="mc-sub-text">
+                                    <LatexText :text="subQ.content" />
+                                </view>
+                                
+                                <view v-if="subQ.options && Object.keys(subQ.options).length > 0" 
+                                      class="mc-opts mt-1" 
+                                      :style="'grid-template-columns: repeat('+(subQ.optionLayout||4)+',1fr)'">
+                                    <view v-for="(val, k) in subQ.options" :key="k" class="mc-opt-item">
+                                        <text class="b">{{k}}.</text><LatexText :text="val" />
+                                    </view>
+                                </view>
+
+                                <view v-if="showAnswerMap[q.id] && subQ.answer" class="mc-sub-ans">
+                                    <text class="tag">小题答案</text>
+                                    <LatexText :text="subQ.answer" />
+                                </view>
+                            </view>
+                        </view>
+
+                        <view v-else-if="q.options && typeof q.options === 'object'" class="mc-opts" :style="'grid-template-columns: repeat('+(q.optionLayout||4)+',1fr)'">
                             <view v-for="(val, k) in q.options" :key="k" class="mc-opt-item">
                                 <text class="b">{{k}}.</text><LatexText :text="val" />
                             </view>
@@ -62,8 +83,9 @@
                         </view>
 
                         <view v-if="showAnswerMap[q.id]" class="mc-ans-box">
-                             <view v-if="q.answer" class="mb-1"><text class="tag">答案</text><LatexText :text="q.answer"/></view>
-                             <view v-if="q.analysis"><text class="tag orange">解析</text><LatexText :text="q.analysis"/></view>
+                             <view v-if="q.answer" class="mb-1"><text class="tag">参考答案</text><LatexText :text="q.answer"/></view>
+                             <view v-if="q.analysis" class="mb-1"><text class="tag orange">解析</text><LatexText :text="q.analysis"/></view>
+                             <view v-if="q.detailed"><text class="tag green">详解</text><LatexText :text="q.detailed"/></view>
                         </view>
                     </view>
                 </view>
@@ -238,6 +260,15 @@ const handleClear = () => {
 .mb-1 { margin-bottom: 5px; }
 .tag { display: inline-block; background: #2563eb; color: white; font-size: 10px; padding: 1px 4px; border-radius: 3px; margin-right: 5px; }
 .tag.orange { background: #f59e0b; }
+.tag.green { background: #10b981; }
+
+/* 新增：子题目样式 */
+.mc-sub-list { margin-top: 10px; border-top: 1px dashed #eee; padding-top: 8px; }
+.mc-sub-item { margin-bottom: 12px; }
+.mc-sub-text { font-size: 13px; color: #334155; display: flex; gap: 4px; }
+.sub-idx { font-weight: bold; flex-shrink: 0; }
+.mc-sub-ans { margin-top: 5px; font-size: 12px; background: #f1f5f9; padding: 4px 8px; border-radius: 4px; color: #64748b; }
+.mt-1 { margin-top: 4px; }
 
 /* 底部 */
 .drawer-footer {
