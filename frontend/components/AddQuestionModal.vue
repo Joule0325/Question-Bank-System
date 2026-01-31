@@ -217,15 +217,21 @@
     </view>
   </CommonModal>
 
-  <CommonModal :isOpen="showOCRModal" maxWidth="800px" @close="closeOCRModal">
-    <template #header>
-        <view class="add-modal-header">
-            <text style="font-weight: bold; font-size: 16px;">📄 题目识别 (PDF/图片)</text>
-            <button class="menu-btn" @click="closeOCRModal">关闭</button>
+  <view v-if="showOCRModal" class="ocr-floating-window" :style="{ left: ocrWindow.x + 'px', top: ocrWindow.y + 'px', width: ocrWindow.width + 'px', height: ocrWindow.height + 'px' }">
+    <view class="ocr-header" @mousedown="startDrag" @touchstart="startDrag">
+        <text class="ocr-title">📄 AI智能识别题目 (PDF/图片)</text>
+        <view class="ocr-controls" @mousedown.stop @touchstart.stop>
+            <view class="model-select">
+                <text>模型:</text>
+                <select v-model="selectedModel" class="model-dropdown">
+                    <option v-for="m in modelOptions" :key="m" :value="m">{{ m }}</option>
+                </select>
+            </view>
+            <view class="win-close-btn" @click="closeOCRModal">✕</view>
         </view>
-    </template>
+    </view>
 
-    <view class="ocr-body" @dragover.prevent @drop.prevent="handleOCRDrop">
+    <view class="ocr-content" @dragover.prevent @drop.prevent="handleOCRDrop">
         
         <view v-if="!ocrResult && !ocrLoading" class="upload-zone" @click="chooseOCRFile">
             <image src="/static/icons/相机.svg" style="width:48px; height:48px; opacity:0.5; margin-bottom:10px;"></image>
@@ -241,14 +247,20 @@
 
         <view v-if="ocrResult" class="result-zone">
             <view class="result-tip">
-                ✅ 识别成功！请复制下方内容，或直接拖拽图片ID。
-                <text class="copy-link" @click="copyOCRResult">一键复制</text>
-            </view>
+                ✅ 识别成功！
+                <view style="display:flex; gap:15px; align-items:center;">
+                    <text class="copy-link" @click="copyOCRResult">复制</text>
+                    <text class="copy-link" style="color: #2563eb; font-weight: 800;" @click="insertOCRResult">
+                        📝 插入到题目编辑器
+                    </text>
+                </view>
+                </view>
             <textarea class="result-editor" v-model="ocrResult" maxlength="-1"></textarea>
         </view>
 
     </view>
-  </CommonModal>
+    <view class="resize-handle" @mousedown="startResize" @touchstart="startResize">↘</view>
+  </view>
 </template>
 
 <script setup>
@@ -299,6 +311,80 @@ let globalShowAnswer = true;
 const showOCRModal = ref(false);
 const ocrLoading = ref(false);
 const ocrResult = ref('');
+
+// Floating Window State
+const ocrWindow = reactive({ x: 100, y: 100, width: 600, height: 500, isDragging: false, isResizing: false, startX: 0, startY: 0, initialW: 0, initialH: 0 });
+const selectedModel = ref('Qwen');
+const modelOptions = ['Qwen', 'DeepSeek'];
+
+const getClientX = (e) => e.clientX ?? (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+const getClientY = (e) => e.clientY ?? (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+
+const startDrag = (e) => {
+    let target = e.target;
+    while (target && target.classList && !target.classList.contains('ocr-header')) {
+        if (target.tagName === 'SELECT' || target.classList.contains('win-close-btn')) return;
+        target = target.parentNode;
+    }
+    
+    ocrWindow.isDragging = true;
+    const cx = getClientX(e);
+    const cy = getClientY(e);
+    ocrWindow.startX = cx - ocrWindow.x;
+    ocrWindow.startY = cy - ocrWindow.y;
+    
+    window.addEventListener('mousemove', onDrag);
+    window.addEventListener('mouseup', stopDrag);
+    window.addEventListener('touchmove', onDrag, { passive: false });
+    window.addEventListener('touchend', stopDrag);
+};
+
+const onDrag = (e) => {
+    if (!ocrWindow.isDragging) return;
+    if (e.type === 'touchmove') e.preventDefault();
+    const cx = getClientX(e);
+    const cy = getClientY(e);
+    ocrWindow.x = cx - ocrWindow.startX;
+    ocrWindow.y = cy - ocrWindow.startY;
+};
+
+const stopDrag = () => {
+    ocrWindow.isDragging = false;
+    window.removeEventListener('mousemove', onDrag);
+    window.removeEventListener('mouseup', stopDrag);
+    window.removeEventListener('touchmove', onDrag);
+    window.removeEventListener('touchend', stopDrag);
+};
+
+const startResize = (e) => {
+    ocrWindow.isResizing = true;
+    ocrWindow.startX = getClientX(e);
+    ocrWindow.startY = getClientY(e);
+    ocrWindow.initialW = ocrWindow.width;
+    ocrWindow.initialH = ocrWindow.height;
+    
+    window.addEventListener('mousemove', onResize);
+    window.addEventListener('mouseup', stopResize);
+    window.addEventListener('touchmove', onResize, { passive: false });
+    window.addEventListener('touchend', stopResize);
+};
+
+const onResize = (e) => {
+    if (!ocrWindow.isResizing) return;
+    if (e.type === 'touchmove') e.preventDefault();
+    const cx = getClientX(e);
+    const cy = getClientY(e);
+    ocrWindow.width = Math.max(400, ocrWindow.initialW + (cx - ocrWindow.startX));
+    ocrWindow.height = Math.max(300, ocrWindow.initialH + (cy - ocrWindow.startY));
+};
+
+const stopResize = () => {
+    ocrWindow.isResizing = false;
+    window.removeEventListener('mousemove', onResize);
+    window.removeEventListener('mouseup', stopResize);
+    window.removeEventListener('touchmove', onResize);
+    window.removeEventListener('touchend', stopResize);
+};
 
 const PROVINCE_LIST = [
     "全国", "北京", "天津", "上海", "重庆", "河北", "山西", "内蒙古", 
@@ -1004,65 +1090,116 @@ const closeOCRModal = () => {
 };
 
 // [核心修改] 支持 File 对象和路径的通用上传函数
+// [替换] 主要是为了适配后端返回的 { content, images } 结构
+// frontend/components/AddQuestionModal.vue
+
 const uploadOCRFile = (fileOrPath) => {
+    if (ocrLoading.value) return;
     ocrLoading.value = true;
-    
-    const uploadOptions = {
-        url: baseUrl + '/api/smart-ocr',
-        name: 'file',
-        header: { 'Authorization': 'Bearer ' + (uni.getStorageSync('token') || '') },
-        success: (res) => {
-            try {
-                // 部分平台 res.data 可能是字符串
-                const data = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
-                if (data.error) throw new Error(data.error);
-                
-                if (data.images) {
-                    tempUploadedImages.value = { ...tempUploadedImages.value, ...data.images };
-                    Object.keys(data.images).forEach(k => imageSizes[k] = 80);
-                }
-                
-                let processedContent = data.content;
-                processedContent = convertHtmlTableToMarkdown(processedContent);
-                
-                ocrResult.value = processedContent;
-                uni.showToast({ title: '识别成功', icon: 'success' });
-            } catch (e) {
-                uni.showToast({ title: '失败: ' + e.message, icon: 'none', duration: 3000 });
-                console.error(e);
-            }
-        },
-        fail: (err) => { 
-            console.error('OCR上传失败:', err);
-            uni.showToast({ title: '网络错误: ' + (err.errMsg || '无法连接服务器'), icon: 'none', duration: 3000 }); 
-        },
-        complete: () => { ocrLoading.value = false; }
-    };
+    ocrResult.value = ''; // Clear previous result
 
-    console.log('开始OCR上传, Options:', uploadOptions);
+    const formData = new FormData();
+    formData.append('model', selectedModel.value);
 
-    // 智能判断参数类型
-    // [修复] H5端优先使用 Blob URL 传参，解决 uploadFile:fail file error
+    // Handle file input (Blob/File or path)
     if (fileOrPath instanceof File || (fileOrPath.raw && fileOrPath.raw instanceof File)) {
-        try {
-            uploadOptions.filePath = window.URL.createObjectURL(fileOrPath);
-            uploadOptions.file = null; // 明确清空 file 字段，强制使用 filePath
-        } catch (e) {
-            console.error('Blob URL creation failed, falling back to File object', e);
-            uploadOptions.file = fileOrPath;
-        }
-    } else if (typeof fileOrPath === 'string') {
-        uploadOptions.filePath = fileOrPath; // 路径字符串
-    } else if (fileOrPath.path) {
-        uploadOptions.filePath = fileOrPath.path; // 小程序文件对象
+         formData.append('file', fileOrPath instanceof File ? fileOrPath : fileOrPath.raw);
+    } else if (fileOrPath.blob && fileOrPath.blob instanceof Blob) {
+         // Handle pasted blob
+         formData.append('file', fileOrPath.blob, 'pasted_image.png');
     } else {
-        // 兜底：尝试转为 Blob URL
-        try { uploadOptions.filePath = window.URL.createObjectURL(fileOrPath); } 
-        catch(e) { console.error('无效的文件对象', e); }
+        // Fallback for path string (not ideal for XHR but try fetching it first)
+        // In browser environment, we usually get a File object. 
+        // If we only have a path (e.g. from uni.chooseImage), we might need to fetch it to blob first.
+        // For simplicity, assuming we have a File object or Blob here as this is web-focused.
+        if (typeof fileOrPath === 'string') {
+             // Try to fetch blob from blob url
+             fetch(fileOrPath).then(r => r.blob()).then(blob => {
+                 uploadOCRFile({ blob }); 
+             }).catch(e => {
+                 ocrLoading.value = false;
+                 uni.showToast({ title: '文件读取失败', icon: 'none' });
+             });
+             return; // Async restart
+        }
     }
 
-    console.log('Final Upload Options:', uploadOptions);
-    uni.uploadFile(uploadOptions);
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', baseUrl + '/api/smart-ocr?model=' + selectedModel.value, true);
+    xhr.setRequestHeader('Authorization', 'Bearer ' + (uni.getStorageSync('token') || ''));
+
+    let lastProcessedIndex = 0;
+
+    xhr.onprogress = () => {
+        const responseText = xhr.responseText;
+        const newContent = responseText.substring(lastProcessedIndex);
+        lastProcessedIndex = responseText.length;
+
+        const lines = newContent.split('\n\n');
+        for (const line of lines) {
+            if (line.trim().startsWith('data: ')) {
+                try {
+                    const jsonStr = line.trim().substring(6);
+                    if (!jsonStr) continue;
+                    const data = JSON.parse(jsonStr);
+
+                    if (data.t === 'txt') {
+                        ocrResult.value += data.c;
+                    } else if (data.t === 'imgs') {
+                        tempUploadedImages.value = { ...tempUploadedImages.value, ...data.d };
+                        Object.keys(data.d).forEach(k => imageSizes[k] = 80);
+                        uni.showToast({ title: `提取到配图`, icon: 'none' });
+                    } else if (data.t === 'err') {
+                        console.error('OCR Stream Error:', data.c);
+                        uni.showToast({ title: '识别错误: ' + data.c, icon: 'none' });
+                    } else if (data.t === 'done') {
+                        // Finished
+                    } else if (data.t === 'status') {
+                        // Optional: update status UI
+                        console.log('OCR Status:', data.c);
+                    }
+                } catch (e) {
+                    // Ignore incomplete JSON chunks
+                }
+            }
+        }
+    };
+
+    xhr.onload = () => {
+        ocrLoading.value = false;
+        if (xhr.status !== 200) {
+            uni.showToast({ title: '请求失败: ' + xhr.status, icon: 'none' });
+        }
+    };
+
+    xhr.onerror = () => {
+        ocrLoading.value = false;
+        uni.showToast({ title: '网络错误', icon: 'none' });
+    };
+
+    xhr.send(formData);
+};
+
+// [新增] 将识别结果智能插入编辑器
+const insertOCRResult = () => {
+    if (!ocrResult.value) return;
+    
+    // 1. 如果编辑器原本是空的，直接赋值；如果已有内容，则换行追加（用分隔符分开）
+    if (inputRawText.value && inputRawText.value.trim()) {
+        // 使用您定义的多题分隔符 ===
+        inputRawText.value += '\n\n===\n\n' + ocrResult.value;
+    } else {
+        inputRawText.value = ocrResult.value;
+    }
+    
+    // 2. 关闭弹窗
+    closeOCRModal();
+    
+    // 3. 稍微延迟后触发“转化”预览，让效果立即可见
+    setTimeout(() => {
+        manualParse(); // 调用您原有的解析函数
+        uni.showToast({ title: '已插入并预览', icon: 'success' });
+    }, 200);
 };
 
 // [修改] 点击上传：使用 uni.chooseFile，兼容 H5 和小程序
@@ -1242,5 +1379,92 @@ defineExpose({ open });
 .result-editor {
     flex: 1; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px;
     font-family: monospace; font-size: 14px; line-height: 1.6; resize: none; background: #fff;
+}
+
+/* Floating Window Styles */
+.ocr-floating-window {
+    position: fixed;
+    z-index: 9999;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+    border: 1px solid #e2e8f0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-width: 300px;
+    min-height: 300px;
+}
+.ocr-header {
+    height: 40px;
+    background: #f1f5f9;
+    border-bottom: 1px solid #e2e8f0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 10px;
+    cursor: move;
+    user-select: none;
+}
+.ocr-title {
+    font-weight: bold;
+    font-size: 14px;
+    color: #334155;
+}
+.ocr-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.model-select {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    color: #64748b;
+}
+.model-dropdown {
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    padding: 2px 4px;
+    font-size: 12px;
+    background: white;
+    outline: none;
+}
+.win-close-btn {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: #94a3b8;
+    border-radius: 4px;
+}
+.win-close-btn:hover {
+    background: #e2e8f0;
+    color: #ef4444;
+}
+.ocr-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 10px;
+    overflow: hidden;
+    background: #fff;
+}
+.resize-handle {
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    width: 15px;
+    height: 15px;
+    cursor: nwse-resize;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    color: #cbd5e1;
+    user-select: none;
 }
 </style>

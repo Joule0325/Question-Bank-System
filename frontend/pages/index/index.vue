@@ -740,7 +740,14 @@ const selectSubject = (index) => { currentSubjectIdx.value = index; subjectDropd
 const openAddModal = () => { showAddModal.value = true; addModalRef.value?.open(); };
 const openEditModal = (q) => { showAddModal.value = true; addModalRef.value?.open(q); };
 const handleDelete = async (id) => { uni.showModal({ content: '确定删除?', success: async (res) => { if(res.confirm) { await deleteQuestion(id); loadQuestions(); } } }); };
-const handleQuestionSaved = async () => { await refreshFilters(); await loadQuestions(); };
+const handleQuestionSaved = async () => { 
+    loading.value = true;
+    questions.value = []; // Force list clear for visual feedback
+    setTimeout(async () => {
+        await refreshFilters(); 
+        await loadQuestions(); 
+    }, 500); // Small delay to ensure backend consistency
+};
 const handleTreeSelect = (e, node) => {
     const id = node.id;
     const isLeaf = !node.children || node.children.length === 0;
@@ -987,7 +994,7 @@ page { height: 100%; overflow: hidden; font-family: "Times New Roman", "SimSun",
 .body-row { display: flex; margin-bottom: 10px; }
 .material-box { border-bottom: 1px dashed #e2e8f0; padding-bottom: 10px; margin-bottom: 15px; }
 .sub-q-list-view { margin-top: 10px; border-top: 1px dashed #eee; padding-top: 10px; }
-.sub-q-row { margin-bottom: 15px; padding: 8px; border-radius: 6px; transition: background 0.3s; }
+.sub-q-row { margin-bottom: 1px; padding: 8px; border-radius: 6px; transition: background 0.3s; }
 .sub-q-row.highlight-active { background-color: #fef2f2; }
 .sub-q-row.highlight-active .sub-q-txt :deep(.latex-text-container) { color: #ef4444; font-weight: bold; }
 .sub-q-tags { display: flex; gap: 6px; margin-top: 4px; }
@@ -995,9 +1002,9 @@ page { height: 100%; overflow: hidden; font-family: "Times New Roman", "SimSun",
 .sub-q-ans-box { margin-top: 6px; font-size: 13px; color: #2563eb; background: #eff6ff; padding: 4px 8px; border-radius: 4px; }
 .ans-label { font-weight: bold; margin-right: 5px; }
 .q-title { flex: 1; font-size: 15px; line-height: 1.6; color: #1e293b; }
-.opt-grid { display: grid; gap: 8px; font-size: 14px; margin-bottom: 10px; color: #334155; }
+.opt-grid { display: grid; gap: 4px 8px; font-size: 14px; margin-bottom: 10px; color: #334155; }
 .opt-key { font-weight: bold; margin-right: 5px; flex-shrink: 0; font-size: 16px;}
-.opt-item { display: flex; align-items: center; margin-bottom: 8px; }
+.opt-item { display: flex; align-items: center; margin-bottom: 0; }
 .opt-item :deep(.latex-text-container) { flex: 1; width: auto; }
 .answer-box { background: #f0f9ff; padding: 12px 15px; border-radius: 6px; border: 1px dashed #bae6fd; font-size: 14px; color: #0c4a6e; }
 .ans-block { margin-bottom: 12px; }

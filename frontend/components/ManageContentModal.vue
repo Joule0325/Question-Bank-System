@@ -42,7 +42,10 @@
               <view class="del-btn-rect" @click="deleteCurrentNode">删除目录及其子目录</view>
             </view>
             </view>
-          <view class="box-body center-txt" v-else>请在左侧选择一个目录 (或根目录)</view>
+          <view class="box-body center-txt" v-else>
+             <text style="color:#2563eb; font-weight:bold;">正在管理一级目录</text>
+             <text style="font-size:12px; margin-left:10px;">(点击左侧目录可进入子目录管理)</text>
+          </view>
         </view>
 
         <view class="cm-box bottom-section flex-1">
@@ -91,13 +94,27 @@ const loadData = async () => {
     const node = findNode(manageTreeData.value, manageSelectedId.value);
     if (node) {
       currentManageNode.value = JSON.parse(JSON.stringify(node));
+      childEditText.value = treeToText(node.children || [], 0);
+    } else {
+        // Node gone, revert to root
+        manageSelectedId.value = null;
+        currentManageNode.value = null;
+        childEditText.value = treeToText(manageTreeData.value, 0);
     }
+  } else {
+    // Root mode
+    currentManageNode.value = null;
+    childEditText.value = treeToText(manageTreeData.value, 0);
   }
 };
 
 watch(() => props.visible, (val) => {
   if (val) {
     loadData();
+    // Keep selection if possible, or reset?
+    // User requested "Click to open... default show Level 1"
+    // So maybe reset on open is better unless we want to preserve state.
+    // The original code reset it.
     manageSelectedId.value = null;
     currentManageNode.value = null;
     childEditText.value = '';
@@ -113,9 +130,17 @@ const findNode = (nodes, id) => {
 };
 
 const handleManageTreeSelect = (e, node) => {
-  manageSelectedId.value = node.id;
-  currentManageNode.value = JSON.parse(JSON.stringify(node));
-  childEditText.value = treeToText(node.children || [], 0);
+  if (manageSelectedId.value === node.id) {
+    // Deselect -> Go to Root Mode
+    manageSelectedId.value = null;
+    currentManageNode.value = null;
+    childEditText.value = treeToText(manageTreeData.value, 0);
+  } else {
+    // Select
+    manageSelectedId.value = node.id;
+    currentManageNode.value = JSON.parse(JSON.stringify(node));
+    childEditText.value = treeToText(node.children || [], 0);
+  }
 };
 
 // ----------------------------------------------------------------
@@ -205,16 +230,17 @@ const parseTextToTree = (text) => {
 
 // 保存逻辑
 const handleConfirmChildren = async () => {
-  if (!currentManageNode.value) return;
   const newChildren = parseTextToTree(childEditText.value);
+  const parentId = currentManageNode.value ? currentManageNode.value.id : null;
+
   try {
     uni.showLoading({ title: '保存中...' });
-    await manageCategory({ action: 'update_list', subjectId: props.subjectId, parentId: currentManageNode.value.id, children: newChildren, mode: props.mode });
+    await manageCategory({ action: 'update_list', subjectId: props.subjectId, parentId: parentId, children: newChildren, mode: props.mode });
     await loadData();
-    const node = findNode(manageTreeData.value, manageSelectedId.value);
-    if(node) childEditText.value = treeToText(node.children || [], 0);
+    // loadData handles text update based on selection
+    
     uni.hideLoading();
-    uni.showToast({title: '子目录已更新', icon: 'success'});
+    uni.showToast({title: '目录已更新', icon: 'success'});
     emit('saved');
   } catch(e) {
     uni.hideLoading(); console.error(e); uni.showToast({title: '保存失败', icon: 'none'});
@@ -222,7 +248,12 @@ const handleConfirmChildren = async () => {
 };
 
 const handleGlobalSave = async () => {
-  if (!currentManageNode.value) { uni.showToast({title: '请先选择目录', icon:'none'}); return false; }
+  if (!currentManageNode.value) { 
+      // Root mode: just save children (level 1 list)
+      await handleConfirmChildren();
+      return true;
+  }
+  
   uni.showLoading({ title: '保存中...' });
   let hasError = false;
   try {
@@ -232,12 +263,11 @@ const handleGlobalSave = async () => {
     const childrenFromText = parseTextToTree(childEditText.value);
     await manageCategory({ action: 'update_list', subjectId: props.subjectId, parentId: currentManageNode.value.id, children: childrenFromText, mode: props.mode });
   } catch(e) { hasError = true; }
+  
   uni.hideLoading();
   if (!hasError) {
     uni.showToast({title:'保存成功', icon:'success'});
     await loadData();
-    const node = findNode(manageTreeData.value, manageSelectedId.value);
-    if(node) childEditText.value = treeToText(node.children || [], 0);
     emit('saved');
     return true;
   } else {

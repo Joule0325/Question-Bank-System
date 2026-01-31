@@ -46,6 +46,9 @@ const handleSubmit = async () => {
             setTimeout(() => {
                 uni.reLaunch({ url: '/pages/index/index' }); // 建议用 reLaunch 彻底刷新
             }, 500);
+        } else {
+            uni.showToast({ title: '注册成功，请登录', icon: 'success' });
+            isLogin.value = true;
         }
     } catch(e) {
         uni.showToast({ title: e.error || '请求失败', icon: 'none' });
