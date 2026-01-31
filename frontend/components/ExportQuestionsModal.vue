@@ -83,7 +83,35 @@
           <scroll-view scroll-y class="settings-scroll">
             
             <view class="setting-group">
-              <text class="group-label">试题属性</text>
+              <text class="group-label">试卷标题</text>
+              <view class="input-row">
+                <input class="custom-input" v-model="titles.main" placeholder="主标题 (如: 2026模拟考)" @input="debounceGenerate" />
+              </view>
+              <view class="input-row" style="margin-top: 8px;">
+                <input class="custom-input" v-model="titles.sub" placeholder="副标题 (如: 物理试题)" @input="debounceGenerate" />
+              </view>
+            </view>
+
+            <view class="setting-group">
+              <text class="group-label">试卷模板</text>
+              <view class="template-grid">
+                <view 
+                  class="tpl-card" 
+                  v-for="(tpl, idx) in templates" 
+                  :key="tpl.id"
+                  :class="{ selected: selectedTplId === tpl.id }"
+                  @click="selectTemplate(tpl)"
+                >
+                  <view class="tpl-thumb">
+                    <view class="thumb-placeholder" :style="{ background: selectedTplId === tpl.id ? '#E0F2FE' : '#F3F4F6' }"></view>
+                  </view>
+                  <text class="tpl-name">{{ tpl.name }}</text>
+                </view>
+              </view>
+            </view>
+
+            <view class="setting-group">
+              <text class="group-label">试题属性 (显示在题干前)</text>
               <view class="checkbox-list">
                 <view 
                   class="cb-item" 
@@ -99,6 +127,24 @@
               </view>
             </view>
 
+            <view class="setting-group">
+              <text class="group-label">包含内容</text>
+              <view class="checkbox-list">
+                <view class="cb-item" @click="toggleContent('answer')">
+                  <view class="cb-box" :class="{ checked: contentSettings.answer }"><text v-if="contentSettings.answer" class="check-mark">✓</text></view>
+                  <text class="cb-label">答案</text>
+                </view>
+                <view class="cb-item" @click="toggleContent('analysis')">
+                  <view class="cb-box" :class="{ checked: contentSettings.analysis }"><text v-if="contentSettings.analysis" class="check-mark">✓</text></view>
+                  <text class="cb-label">解析</text>
+                </view>
+                <view class="cb-item" @click="toggleContent('detailed')">
+                  <view class="cb-box" :class="{ checked: contentSettings.detailed }"><text v-if="contentSettings.detailed" class="check-mark">✓</text></view>
+                  <text class="cb-label">详解</text>
+                </view>
+              </view>
+            </view>
+            
             <view class="setting-group">
               <text class="group-label">答案位置</text>
               <view class="radio-list">
@@ -121,29 +167,6 @@
               </view>
             </view>
 
-            <view class="setting-group">
-              <text class="group-label">试卷模板</text>
-              <view class="template-grid">
-                <view 
-                  class="tpl-card" 
-                  v-for="(tpl, idx) in templates" 
-                  :key="tpl.id"
-                  :class="{ selected: selectedTplId === tpl.id }"
-                  @click="selectTemplate(tpl)"
-                >
-                  <view class="tpl-thumb">
-                    <view class="thumb-placeholder"></view>
-                  </view>
-                  <text class="tpl-name">{{ tpl.name }}</text>
-                </view>
-                
-                <view class="tpl-card upload-card" @click="uploadTemplate">
-                  <view class="upload-icon">+</view>
-                  <text class="tpl-name">上传</text>
-                </view>
-              </view>
-            </view>
-
           </scroll-view>
         </view>
 
@@ -156,14 +179,11 @@
 import { ref, reactive, watch, nextTick } from 'vue';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
-import { compilePaper } from '@/api/question.js'; // 引入编译 API
+import { compilePaper } from '@/api/question.js';
 
 const props = defineProps({
   visible: Boolean,
-  questions: {
-    type: Array,
-    default: () => []
-  }
+  questions: { type: Array, default: () => [] }
 });
 
 const emit = defineEmits(['update:visible', 'export']);
@@ -171,41 +191,57 @@ const emit = defineEmits(['update:visible', 'export']);
 const mode = ref('latex');
 const sourceCode = ref('');
 const isExporting = ref(false);
-
-const answerPos = ref('end');
-const selectedTplId = ref(1);
-
-// 图片资源映射表
-let imageAssets = {};
-
-// [新增] 编译相关状态
-const viewMode = ref('code'); // 'code' | 'preview'
+const viewMode = ref('code'); 
 const isCompiling = ref(false);
 const pdfUrl = ref('');
 const compileError = ref('');
 
+// --- 设置状态 ---
+const titles = reactive({ main: '高中物理练习题', sub: '测试卷' });
+const answerPos = ref('end');
+const selectedTplId = ref(1);
+
 const metadata = reactive({
-  source: false,
   year: true,
-  province: false,
-  difficulty: false
+  province: true,
+  source: true,
+  difficulty: true
+});
+
+const contentSettings = reactive({
+  answer: false,
+  analysis: false,
+  detailed: false
 });
 
 const metadataOpts = [
-  { key: 'source', label: '来源' },
   { key: 'year', label: '年份' },
   { key: 'province', label: '省份' },
+  { key: 'source', label: '来源' },
   { key: 'difficulty', label: '难度' }
 ];
 
 const templates = ref([
-  { id: 1, name: "标准\n试卷" },
-  { id: 2, name: "两栏\n紧凑" },
-  { id: 3, name: "答题卡\nA3" },
-  { id: 4, name: "作业\n练习" }
+  { id: 1, name: "标准试卷" },
+  { id: 2, name: "两栏紧凑" },
+  { id: 3, name: "答题卡A3" },
+  { id: 4, name: "作业练习" }
 ]);
 
-// 核心兼容逻辑：解决 404
+let imageAssets = {};
+let debounceTimer = null;
+
+const debounceGenerate = () => {
+  if (debounceTimer) clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(() => generateLatex(), 500);
+};
+
+// --- 工具函数 ---
+const cleanTex = (text) => {
+  if (!text) return '';
+  return text.replace(/([#%&_{}])/g, '\\$1');
+};
+
 const resolveImageInfo = (rawUrl) => {
   const cleanUrl = rawUrl.split('?')[0];
   let originalName = cleanUrl.split('/').pop(); 
@@ -216,293 +252,280 @@ const resolveImageInfo = (rawUrl) => {
   return { saveFilename, downloadUrl };
 };
 
-const convertContentToLatex = (text) => {
-  if (!text) return '';
-  
-  // 1. 分割文本和公式 (简单处理 $...$ )
-  // 偶数索引为文本，奇数索引为公式
-  const parts = text.split(/(\$[^$]*\$)/g);
+// [终极修复版] 内容处理：
+// 修复：使用 \hspace{2em} 强制缩进，替代无效的 \indent
+const processContent = (text, imgCallback) => {
+   if (!text) return '';
+   
+   const placeholders = [];
+   let processed = text;
 
-  const processedParts = parts.map((part, index) => {
-    if (index % 2 === 1) {
-      // --- 公式部分 ---
-      // 保持原样，不转义
-      return part;
-    } else {
-      // --- 文本部分 ---
-      let latex = part;
+   // 1. 提取 Markdown 图片 -> 存入占位符 (无下划线)
+   processed = processed.replace(/!\[.*?\]\((.*?)\)/g, (match, url) => {
+       const ph = `IMGPH${placeholders.length}END`;
+       placeholders.push({ type: 'md', url, pos: 'l' });
+       return ph;
+   });
 
-      // 1. 处理填空题下划线 (连续2个以上)
-      latex = latex.replace(/_{2,}/g, ' \\underline{\\hspace{2em}} ');
+   // 2. 提取系统格式图片 [img:url:pos:scale] -> 存入占位符
+   const imgRegex = /\[img:(.*?):([lmr]):(\d+)\]/g;
+   processed = processed.replace(imgRegex, (match, url, pos, scale) => {
+       const ph = `IMGPH${placeholders.length}END`;
+       placeholders.push({ type: 'custom', url, pos, scale });
+       return ph;
+   });
+   
+   // 3. 全局转义特殊字符 (保护公式 $...$)
+   const parts = processed.split(/(\$[^$]*\$)/g);
+   processed = parts.map((part, idx) => {
+       if (idx % 2 === 1) return part; // 公式不转义
+       
+       // 预处理 HTML 换行
+       let p = part.replace(/<br\s*\/?>/gi, ' \\newline ').replace(/&nbsp;/g, ' ');
+       
+       // 转义 LaTeX 特殊字符
+       return p.replace(/([#%&_{}])/g, '\\$1')
+               .replace(/\^/g, '\\textasciicircum ')
+               .replace(/~/g, '\\textasciitilde ');
+   }).join('');
 
-      // 2. 转义特殊字符 (不转义 _，交给 macro/package 处理，但要转义 & % #)
-      latex = latex.replace(/([&%#])/g, '\\$1');
-      latex = latex.replace(/\^/g, '\\textasciicircum ');
-      latex = latex.replace(/~/g, '\\textasciitilde ');
+   // 4. 解析 HTML 样式 -> 转换为 LaTeX 命令
+   // 修复：text-indent 改用 \hspace{2em}
+   processed = processed.replace(/<(div|p|span)[^>]*style="([^"]+)"[^>]*>([\s\S]*?)<\/\1>/gi, (match, tag, style, content) => {
+       let result = content;
+       
+       // 检测样式关键字 (忽略大小写)
+       const isBold = /font-weight:\s*bold/i.test(style);
+       const isCenter = /text-align:\s*center/i.test(style);
+       // 关键修改：检测首行缩进
+       const isIndent = /text-indent:\s*2em/i.test(style);
+       
+       // 应用 LaTeX 样式
+       if (isBold) {
+           result = `\\textbf{${result}}`;
+       }
+       if (isCenter) {
+           // 使用 center 环境
+           result = `\\par \\begin{center} ${result} \\end{center} \\par`;
+       }
+       // 修复：强制插入 2em 空白
+       if (isIndent) {
+           result = `\\par \\hspace{2em} ${result}`;
+       }
+       
+       return result;
+   });
 
-      // 3. 处理换行
-      // 将 HTML <br> 或 <p> 转换为 LaTeX 换行
-      latex = latex.replace(/<br\s*\/?>/gi, ' \\newline ');
-      latex = latex.replace(/<\/p>/gi, ' \\par ');
-      latex = latex.replace(/<p[^>]*>/gi, '');
-      // 处理普通文本中的换行符 (保留用户输入的换行结构)
-      latex = latex.replace(/\n/g, ' \\newline ');
+   // 5. 清理剩余的无样式 HTML 标签
+   processed = processed.replace(/<\/?(div|p)>/gi, ' \\par ');
+   processed = processed.replace(/<\/?span>/gi, ' ');
 
-      // 4. 清理 HTML 标签
-      latex = latex.replace(/<[^>]+>/g, '');
+   // 6. 还原图片 (根据 pos 生成环境)
+   placeholders.forEach((item, index) => {
+       const ph = `IMGPH${index}END`;
+       let latex = '';
+       if (imgCallback) {
+           const { saveFilename, downloadUrl } = resolveImageInfo(item.url);
+           imgCallback(saveFilename, downloadUrl);
+           
+           let widthScale = 0.6; 
+           if (item.type === 'custom') {
+               widthScale = (parseInt(item.scale) || 80) / 100;
+               if (widthScale > 1) widthScale = 1;
+           }
+           
+           const imgCmd = `\\includegraphics[width=${widthScale}\\linewidth,keepaspectratio]{images/${saveFilename}}`;
+           
+           // 根据对齐方式包裹
+           if (item.pos === 'm') { // 居中
+               latex = `\\par \\begin{center} ${imgCmd} \\end{center} \\par`;
+           } else if (item.pos === 'r') { // 右对齐
+               latex = `\\par {\\raggedleft ${imgCmd} \\par}`;
+           } else { // 左对齐
+               latex = ` ${imgCmd} `;
+           }
+       }
+       processed = processed.replace(ph, latex);
+   });
 
-      // 5. HTML 实体
-      latex = latex.replace(/&nbsp;/g, ' ');
-      latex = latex.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
-
-      // 6. 处理自定义图片格式 (内嵌，不使用 figure 环境)
-      // 预览区所见即所得：图片如果不换行，这里也不换行
-      const imgRegex = /\[img:(.*?):([lmr]):(\d+)\]/g;
-      latex = latex.replace(imgRegex, (match, rawUrl, pos, scale) => {
-        const { saveFilename, downloadUrl } = resolveImageInfo(rawUrl);
-        imageAssets[saveFilename] = downloadUrl;
-        
-        // 缩放比例
-        const widthVal = (parseInt(scale) / 100).toFixed(2);
-        
-        // 直接插入图片，不带任何位置环境，跟随文本流
-        // 使用 raisebox 垂直居中对齐 (0.5\height 使图片中心对齐基线，实际上通常需要微调，但这是通用做法)
-        return `\\raisebox{-0.5\\height}{\\includegraphics[width=${widthVal}\\linewidth]{images/${saveFilename}}}`;
-      });
-
-      return latex;
-    }
-  });
-
-  let latex = processedParts.join('');
-
-  // 7. 处理 Markdown 表格 (全局处理，因为表格是块级元素)
-  // 简易逻辑：识别被 \newline 分隔的行，如果看起来像表格则转换
-  // 注意：上面的 \n 已经被替换为 \newline
-  if (latex.includes('|')) {
-    const lines = latex.split(/ \\newline | \\par /); // 根据刚才替换的换行符分割
-    let inTable = false;
-    let tableLines = [];
-    let newLines = [];
-
-    const processTable = (tLines) => {
-        // 过滤空行
-        const contentLines = tLines.filter(l => !/^[\s|:-]+$/.test(l));
-        if (contentLines.length === 0) return '';
-        
-        // 确定列数
-        const firstLine = contentLines[0];
-        // 移除转义后的 \| 或普通 |
-        const cols = firstLine.split('|').filter(s => s && s.trim() !== '').length;
-        if (cols === 0) return tLines.join(' \\newline ');
-
-        const colSpec = '|' + Array(cols).fill('X<{\\centering}').join('|') + '|';
-        let tableBody = '';
-        
-        contentLines.forEach(row => {
-            const cells = row.split('|');
-            const cleanCells = cells.filter((c, i) => {
-                 // 过滤首尾的空分割
-                 if ((i === 0 || i === cells.length - 1) && (!c || c.trim() === '')) return false;
-                 return true;
-            });
-            // 单元格之间用 & 连接
-            const latexCells = cleanCells.map(c => c.trim()).join(' & ');
-            tableBody += `      ${latexCells} \\\\ \\hline\n`;
-        });
-
-        return `
-\\begin{table}[H]
-  \\centering
-  \\begin{tabularx}{\\linewidth}{${colSpec}}
-    \\hline
-${tableBody}  \\end{tabularx}
-\\end{table}
-`;
-    };
-
-    lines.forEach(line => {
-        const trimmed = line.trim();
-        // 简单的表格行判断：以 | 开头并以 | 结尾 (忽略转义符检查，简化处理)
-        if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
-            if (!inTable) inTable = true;
-            tableLines.push(trimmed);
-        } else {
-            if (inTable) {
-                newLines.push(processTable(tableLines));
-                tableLines = [];
-                inTable = false;
-            }
-            newLines.push(line);
-        }
-    });
-    if (inTable) { newLines.push(processTable(tableLines)); }
-    
-    // 重新组合，使用 \n 连接，因为表格环境本身是块级的
-    latex = newLines.join('\n'); 
-  }
-
-  return latex;
+   return processed;
 };
 
+// 格式化选项
+const formatOptions = (options, layoutVal) => {
+    const layout = Number(layoutVal) || 4; 
+    const opts = [];
+    ['A', 'B', 'C', 'D'].forEach(k => {
+        if (options[k]) opts.push(`\\textbf{${k}.} ${processContent(options[k], (n, u) => imageAssets[n] = u)}`);
+    });
+    
+    if (opts.length === 0) return '';
+
+    let cols = 'l'.repeat(layout); 
+    let latex = `\\par \\noindent \\begin{tabular}{@{\\hspace{1em}}${cols}}\n`;
+    
+    for (let i = 0; i < opts.length; i++) {
+        latex += opts[i];
+        if ((i + 1) % layout === 0 && i !== opts.length - 1) {
+            latex += ' \\\\ \n';
+        } else if (i !== opts.length - 1) {
+            latex += ' & ';
+        }
+    }
+    latex += `\n\\end{tabular}`;
+    return latex;
+};
+
+// --- 核心生成逻辑 ---
 const generateLatex = () => {
   imageAssets = {};
   
-  let content = `\\documentclass[UTF8]{ctexart}
+  let docClassOpt = 'UTF8';
+  let geoOpt = 'a4paper,landscape,left=2cm,right=2cm,top=2cm,bottom=2cm';
+  
+  if (selectedTplId.value === 2) {
+      docClassOpt += ',twocolumn';
+      geoOpt = 'a4paper,left=1.5cm,right=1.5cm,top=2cm,bottom=2cm';
+  } else if (selectedTplId.value === 3) {
+      geoOpt = 'a3paper,landscape,twocolumn,left=2cm,right=2cm,top=2cm,bottom=2cm';
+  }
+
+  let content = `\\documentclass[${docClassOpt}]{ctexart}
 \\usepackage{geometry}
-\\geometry{a4paper,scale=0.8}
+\\geometry{${geoOpt}}
 \\usepackage{amsmath}
 \\usepackage{amssymb}
 \\usepackage{graphicx}
 \\usepackage{float}
-\\usepackage{booktabs}
 \\usepackage{tabularx}
-\\usepackage{array}
-\\usepackage{underscore}
+\\usepackage{xcolor}
 \\usepackage{enumitem}
 
 \\setlength{\\parindent}{0pt}
-\\setlength{\\parskip}{1em}
-\\setlength{\\fboxrule}{0pt} % 移除图片边框
+\\setlength{\\parskip}{0.5em}
 
-\\title{数学测试试卷}
+\\title{\\heiti \\zihao{2} ${cleanTex(titles.main)} \\\\ \\vspace{0.5em} \\kaishu \\zihao{3} ${cleanTex(titles.sub)}}
 \\author{}
-\\date{\\today}
+\\date{}
 
 \\begin{document}
-
 \\maketitle
-
-\\section*{一、题目列表}
+\\vspace{1em}
 
 `;
 
-  if (!props.questions || props.questions.length === 0) {
-    content += `% 暂无题目数据\n`;
-  } else {
+  if (props.questions && props.questions.length > 0) {
     props.questions.forEach((q, index) => {
-      const qTitle = convertContentToLatex(q.title || '');
-      content += `\\paragraph{第 ${index + 1} 题} \n`;
-      content += `${qTitle}\n`;
+      // 1. 属性拼接
+      let prefixParts = [];
+      if (metadata.year && q.year) prefixParts.push(q.year);
+      if (metadata.province && q.province) prefixParts.push(q.province);
+      if (metadata.source && q.source) prefixParts.push(q.source);
+      let prefixStr = prefixParts.join('');
 
-      // 处理小题
-      if (q.subQuestions && q.subQuestions.length > 0) {
-          q.subQuestions.forEach((subQ, idx) => {
-              const subContent = convertContentToLatex(subQ.content || '');
-              // [修改] 移除自动编号 (${idx+1})，仅输出内容 + 换行
-              content += `${subContent} \\par\n`; 
-              
-              // 小题选项
-              if (subQ.options && Object.keys(subQ.options).length > 0) {
-                  const validKeys = Object.keys(subQ.options).filter(k => subQ.options[k] && subQ.options[k].trim() !== '');
-                  if (validKeys.length > 0) {
-                      content += `    \\begin{itemize}[nosep, topsep=0pt]\n`;
-                      validKeys.forEach(key => {
-                          const optContent = convertContentToLatex(subQ.options[key]);
-                          content += `      \\item[${key}.] ${optContent}\n`;
-                      });
-                      content += `    \\end{itemize}\n`;
-                  }
-              }
-          });
-      }  
-      // 处理主题选项 (如果没小题)
-      else if (q.options && Object.keys(q.options).length > 0) {
-          const validKeys = Object.keys(q.options).filter(k => q.options[k] && q.options[k].trim() !== '');
-          if (validKeys.length > 0) {
-              content += `\\begin{itemize}[nosep, topsep=0pt]\n`;
-              validKeys.forEach(key => {
-                  const optContent = convertContentToLatex(q.options[key]);
-                  content += `  \\item[${key}.] ${optContent}\n`;
-              });
-              content += `\\end{itemize}\n`;
-          }
+      let diffStr = (metadata.difficulty && q.difficulty) ? `${q.difficulty}星` : '';
+      
+      let finalAttr = '';
+      if (prefixStr && diffStr) {
+          finalAttr = `(${prefixStr} ${diffStr})`; 
+      } else if (prefixStr || diffStr) {
+          finalAttr = `(${prefixStr}${diffStr})`;
       }
 
-      if (answerPos.value === 'question') {
-         // 答案部分也要处理小题
-         let qAns = '';
-         let qAnalysis = '';
-         let qDetailed = '';
+      // 2. 题干
+      const qTitle = processContent(q.title || '', (n, u) => imageAssets[n] = u);
+      content += `\\noindent\\textbf{${index + 1}.} ${finalAttr ? '\\small ' + finalAttr + ' \\normalsize ' : ''}${qTitle}\n\n`;
 
-         if (q.subQuestions && q.subQuestions.length > 0) {
-             q.subQuestions.forEach((subQ, idx) => {
-                 // [修改] 移除自动编号
-                 qAns += convertContentToLatex(subQ.answer || '略') + ' ';
-                 if (subQ.analysis) qAnalysis += convertContentToLatex(subQ.analysis) + ' ';
-                 if (subQ.detailed) qDetailed += convertContentToLatex(subQ.detailed) + ' ';
-             });
-         } else {
-             qAns = convertContentToLatex(q.answer || '略');
-             qAnalysis = convertContentToLatex(q.analysis || '');
-             qDetailed = convertContentToLatex(q.detailed || '');
-         }
-         
-         content += `\\vspace{0.5cm}\\textbf{【答案】} ${qAns} \\par\n`;
-         if (qAnalysis) content += `\\textbf{【解析】} ${qAnalysis} \\par\n`;
-         if (qDetailed) content += `\\textbf{【详解】} ${qDetailed} \\par\n`;
-         
-         content += `\\vspace{0.5cm}\\hrule\\vspace{0.5cm}\n`;
+      // 3. 题目选项
+      if (q.options && (q.options.A || q.options.B)) {
+          content += formatOptions(q.options, q.optionLayout) + '\n\n';
+      }
+
+      // 4. 小题处理
+      if (q.subQuestions && q.subQuestions.length > 0) {
+          q.subQuestions.forEach(sub => {
+              const subContent = processContent(sub.content || '', (n, u) => imageAssets[n] = u);
+              content += `\\par \\indent ${subContent}\n\n`;
+              if (sub.options && (sub.options.A || sub.options.B)) {
+                  content += formatOptions(sub.options, sub.optionLayout) + '\n\n';
+              }
+          });
+      }
+
+      // 5. 答案跟随模式
+      if (answerPos.value === 'question') {
+          let extras = buildAnswerBlock(q);
+          if (extras.length > 0) {
+               content += `\\par \\vspace{0.5em} \\noindent \\color{blue} ${extras.join('\\\\ ')} \\color{black} \n\n`;
+               content += `\\vspace{0.5cm}\\hrule\\vspace{0.5cm}\n`;
+          } else {
+               content += `\\vspace{1cm}\n`;
+          }
       } else {
-         content += `\\vspace{1cm}\n`;
+          content += `\\vspace{1cm}\n`;
       }
     });
   }
 
-  if (answerPos.value === 'end' && props.questions && props.questions.length > 0) {
-      content += `\\newpage\n\\section*{二、参考答案}\n`;
-      props.questions.forEach((q, index) => {
-          let qAns = '';
-          let qAnalysis = '';
-          let qDetailed = '';
-
-          if (q.subQuestions && q.subQuestions.length > 0) {
-             q.subQuestions.forEach((subQ, idx) => {
-                 // [修改] 移除自动编号
-                 qAns += convertContentToLatex(subQ.answer || '略') + '\\\\ '; 
-                 if (subQ.analysis) qAnalysis += convertContentToLatex(subQ.analysis) + '\\\\ ';
-                 if (subQ.detailed) qDetailed += convertContentToLatex(subQ.detailed) + '\\\\ ';
-             });
-          } else {
-             qAns = convertContentToLatex(q.answer || '略');
-             qAnalysis = convertContentToLatex(q.analysis || '');
-             qDetailed = convertContentToLatex(q.detailed || '');
-          }
-          
-          content += `\\paragraph{第 ${index + 1} 题}\n`;
-          content += `\\textbf{【答案】} ${qAns} \\par\n`;
-          if (qAnalysis) content += `\\textbf{【解析】} ${qAnalysis} \\par\n`;
-          if (qDetailed) content += `\\textbf{【详解】} ${qDetailed} \\par\n`;
-      });
+  // 6. 试卷末尾的参考答案
+  if (answerPos.value === 'end' && props.questions.length > 0) {
+      if (contentSettings.answer || contentSettings.analysis || contentSettings.detailed) {
+          content += `\\newpage\n\\section*{参考答案}\n`;
+          props.questions.forEach((q, index) => {
+              let extras = buildAnswerBlock(q);
+              if (extras.length > 0) {
+                  content += `\\paragraph{第 ${index + 1} 题}\n`;
+                  content += `${extras.join('\\par ')}\n`;
+              }
+          });
+      }
   }
 
   content += `\n\\end{document}`;
   sourceCode.value = content;
 };
 
-// [新增] 编译处理函数
-// [修改] 编译处理函数
+// 辅助：构建答案块文本
+const buildAnswerBlock = (q) => {
+    let parts = [];
+    
+    if (q.subQuestions && q.subQuestions.length > 0) {
+        let subAns = [], subAna = [], subDet = [];
+        q.subQuestions.forEach((sub, idx) => {
+            if (contentSettings.answer && sub.answer) subAns.push(`(${idx+1}) ${cleanTex(sub.answer)}`);
+            if (contentSettings.analysis && sub.analysis) subAna.push(`(${idx+1}) ${processContent(sub.analysis, (n,u)=>imageAssets[n]=u)}`);
+            if (contentSettings.detailed && sub.detailed) subDet.push(`(${idx+1}) ${processContent(sub.detailed, (n,u)=>imageAssets[n]=u)}`);
+        });
+        
+        if (subAns.length > 0) parts.push(`\\textbf{【答案】} ${subAns.join('；')}`);
+        if (subAna.length > 0) parts.push(`\\textbf{【解析】} ${subAna.join('；')}`);
+        if (subDet.length > 0) parts.push(`\\textbf{【详解】} ${subDet.join('；')}`);
+        
+    } else {
+        if (contentSettings.answer && q.answer) parts.push(`\\textbf{【答案】} ${cleanTex(q.answer)}`);
+        if (contentSettings.analysis && q.analysis) parts.push(`\\textbf{【解析】} ${processContent(q.analysis, (n,u)=>imageAssets[n]=u)}`);
+        if (contentSettings.detailed && q.detailed) parts.push(`\\textbf{【详解】} ${processContent(q.detailed, (n,u)=>imageAssets[n]=u)}`);
+    }
+    return parts;
+};
+
+// --- 事件处理 ---
 const handleCompile = async () => {
   viewMode.value = 'preview';
-  
-  await nextTick(); // 确保 v-model 更新
-
+  await nextTick();
   if (isCompiling.value || !sourceCode.value) return;
 
   isCompiling.value = true;
   compileError.value = '';
 
   try {
-    // 关键修改：传入 imageAssets
-    // 这个对象里存了 { "1.jpg": "http://.../1.jpg" } 这样的映射关系
     const res = await compilePaper(sourceCode.value, imageAssets);
     if (res.url) {
       pdfUrl.value = res.url + '?t=' + Date.now();
     }
   } catch (err) {
     console.error('编译失败:', err);
-    const errorMsg = err.log || err.error || '未知错误';
-    compileError.value = errorMsg;
+    compileError.value = err.log || err.error || '未知错误';
   } finally {
     isCompiling.value = false;
   }
@@ -522,59 +545,37 @@ const handleExport = async () => {
     if (assetEntries.length > 0) {
         const downloadPromises = assetEntries.map(async ([saveFilename, downloadUrl]) => {
           try {
-            const res = await uni.request({
-              url: downloadUrl,
-              method: 'GET',
-              responseType: 'arraybuffer'
-            });
-            if (res.statusCode === 200) {
-              imgFolder.file(saveFilename, res.data);
-            } else {
-              imgFolder.file(saveFilename + "_error.txt", `HTTP ${res.statusCode}`);
-            }
-          } catch (e) {
-            imgFolder.file(saveFilename + "_error.txt", "Net Error");
-          }
+            const res = await uni.request({ url: downloadUrl, method: 'GET', responseType: 'arraybuffer' });
+            if (res.statusCode === 200) imgFolder.file(saveFilename, res.data);
+          } catch (e) {}
         });
         await Promise.all(downloadPromises);
     }
-
     const content = await zip.generateAsync({ type: "blob" });
-    saveAs(content, "latex_paper_export.zip");
+    saveAs(content, "latex_paper.zip");
     uni.showToast({ title: '导出成功', icon: 'success' });
     emit('export');
   } catch (error) {
     uni.showToast({ title: '导出失败', icon: 'none' });
   } finally {
-    if (isExporting.value) {
-        uni.hideLoading();
-        isExporting.value = false;
-    }
+    uni.hideLoading();
+    isExporting.value = false;
   }
 };
 
-watch(() => props.visible, (newVal) => {
-  if (newVal) generateLatex();
-});
-
-watch(() => props.questions, () => {
-    if (props.visible) {
-        generateLatex();
-        pdfUrl.value = ''; // 数据变更，重置PDF
-        viewMode.value = 'code';
-    }
-}, { deep: true });
-
-watch(answerPos, generateLatex);
-
 const close = () => { emit('update:visible', false); };
 const setMode = (m) => { mode.value = m; };
-const toggleMeta = (key) => { metadata[key] = !metadata[key]; };
-const selectTemplate = (tpl) => { selectedTplId.value = tpl.id; };
-const uploadTemplate = () => { uni.showToast({ title: '上传功能待开发', icon: 'none' }); };
+const toggleMeta = (key) => { metadata[key] = !metadata[key]; debounceGenerate(); };
+const toggleContent = (key) => { contentSettings[key] = !contentSettings[key]; debounceGenerate(); };
+const selectTemplate = (tpl) => { selectedTplId.value = tpl.id; debounceGenerate(); };
+
+watch(() => props.visible, (newVal) => { if (newVal) generateLatex(); });
+watch(() => props.questions, () => { if (props.visible) { generateLatex(); pdfUrl.value = ''; } }, { deep: true });
+watch(answerPos, generateLatex);
 </script>
 
 <style lang="scss" scoped>
+/* 样式保持不变 */
 .export-modal-container {
   font-family: "Times New Roman", "Songti SC", "SimSun", serif;
 }
@@ -621,231 +622,103 @@ const uploadTemplate = () => { uni.showToast({ title: '上传功能待开发', i
   background: #F3F4F6;
   border-radius: 6px;
   padding: 2px;
-  
   .switch-item {
-    padding: 6px 16px;
-    font-size: 14px;
-    color: #4B5563;
-    cursor: pointer;
-    border-radius: 4px;
-    transition: all 0.2s;
-    
-    &.active {
-      background: #3B82F6;
-      color: #FFFFFF;
-      font-weight: bold;
-    }
+    padding: 6px 16px; font-size: 14px; color: #4B5563; cursor: pointer; border-radius: 4px; transition: all 0.2s;
+    &.active { background: #3B82F6; color: #FFFFFF; font-weight: bold; }
   }
 }
 
 .header-actions {
-  display: flex;
-  gap: 12px;
-  
+  display: flex; gap: 12px;
   .action-btn {
-    padding: 8px 20px;
-    border-radius: 6px;
-    font-size: 14px;
-    border: none;
-    cursor: pointer;
-    color: white;
-    font-family: inherit;
-    
-    &.primary { background: #10B981; }
-    &.primary:hover { background: #059669; }
-    &.primary:disabled { background: #6EE7B7; cursor: not-allowed; }
-    
-    &.danger { background: #EF4444; }
-    &.danger:hover { background: #DC2626; }
+    padding: 8px 20px; border-radius: 6px; font-size: 14px; border: none; cursor: pointer; color: white;
+    &.primary { background: #10B981; &:hover { background: #059669; } &:disabled { background: #6EE7B7; } }
+    &.danger { background: #EF4444; &:hover { background: #DC2626; } }
   }
 }
 
-.modal-body {
-  flex: 1;
-  display: flex;
-  gap: 16px;
-  overflow: hidden;
-}
+.modal-body { flex: 1; display: flex; gap: 16px; overflow: hidden; }
 
-.col {
-  background: #FFFFFF;
-  border-radius: 8px;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
+.col { background: #FFFFFF; border-radius: 8px; display: flex; flex-direction: column; overflow: hidden; }
 
-/* [新增/修改] 标题样式，支持 Tab */
 .col-title {
-  height: 40px;
-  background: #F9FAFB;
-  border-bottom: 1px solid #E5E7EB;
-  display: flex;
-  align-items: center;
-  font-size: 14px;
-  font-weight: bold;
-  color: #374151;
-  flex-shrink: 0;
-  
+  height: 40px; background: #F9FAFB; border-bottom: 1px solid #E5E7EB; display: flex; align-items: center; font-size: 14px; font-weight: bold; color: #374151; flex-shrink: 0;
   &.tab-header {
-    justify-content: flex-start;
-    padding: 0;
-    
+    justify-content: flex-start; padding: 0;
     .tab-item {
-      height: 100%;
-      padding: 0 20px;
-      display: flex;
-      align-items: center;
-      cursor: pointer;
-      color: #6B7280;
-      transition: all 0.2s;
-      
+      height: 100%; padding: 0 20px; display: flex; align-items: center; cursor: pointer; color: #6B7280;
       &:hover { background: #F3F4F6; }
-      
-      &.active {
-        color: #3B82F6;
-        font-weight: bold;
-        background: #FFFFFF;
-        position: relative;
-        &::after {
-          content: '';
-          position: absolute;
-          bottom: 0;
-          left: 0;
-          width: 100%;
-          height: 2px;
-          background: #3B82F6;
-        }
-      }
+      &.active { color: #3B82F6; font-weight: bold; background: #FFFFFF; border-bottom: 2px solid #3B82F6; }
     }
     .divider { color: #E5E7EB; margin: 0 5px; font-weight: normal; }
   }
 }
 
 .col-source {
-  flex: 1; 
-  
-  .source-editor {
-    flex: 1;
-    width: 100%;
-    padding: 16px;
-    border: none;
-    outline: none;
-    resize: none;
-    font-family: 'Roboto Mono', 'Menlo', monospace;
-    font-size: 13px;
-    line-height: 1.6;
-    color: #1F2937;
-    background: #FFFFFF;
-    box-sizing: border-box;
-  }
+  flex: 1;
+  .source-editor { flex: 1; width: 100%; padding: 16px; border: none; outline: none; resize: none; font-family: monospace; font-size: 13px; color: #1F2937; background: #FFFFFF; box-sizing: border-box; }
 }
 
-/* [新增] PDF 预览样式 */
 .pdf-preview-container {
-  flex: 1;
-  width: 100%;
-  height: 0;
-  background: #E5E7EB;
-  position: relative;
-  
-  .pdf-frame {
-    width: 100%;
-    height: 100%;
-    background: #fff;
-  }
-  
+  flex: 1; width: 100%; height: 0; background: #E5E7EB; position: relative;
+  .pdf-frame { width: 100%; height: 100%; background: #fff; }
   .preview-placeholder {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 20px;
-    color: #6B7280;
-    
+    position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; color: #6B7280;
     .loading-text { color: #3B82F6; font-weight: bold; }
-    
-    .error-box {
-      width: 90%;
-      height: 80%;
-      background: #FEF2F2;
-      border: 1px solid #FECACA;
-      border-radius: 6px;
-      padding: 10px;
-      display: flex;
-      flex-direction: column;
-      
-      .error-title {
-        color: #DC2626;
-        font-weight: bold;
-        margin-bottom: 8px;
-      }
-      .error-log {
-        flex: 1;
-        height: 0;
-        font-family: monospace;
-        font-size: 12px;
-        color: #7F1D1D;
-        white-space: pre-wrap;
-      }
-    }
+    .error-box { width: 90%; height: 80%; background: #FEF2F2; border: 1px solid #FECACA; padding: 10px; color: #7F1D1D; font-size: 12px; white-space: pre-wrap; }
   }
 }
 
 .col-settings {
   width: 300px;
-  
-  .settings-scroll {
-    flex: 1;
-    padding: 16px;
-    box-sizing: border-box;
-  }
-  
+  .settings-scroll { flex: 1; padding: 16px; box-sizing: border-box; }
   .setting-group { margin-bottom: 24px; }
   .group-label { font-size: 13px; font-weight: bold; color: #374151; margin-bottom: 12px; display: block; }
+  .custom-input { width: 100%; padding: 8px; border: 1px solid #D1D5DB; border-radius: 4px; font-size: 14px; box-sizing: border-box; }
   
-  .checkbox-list {
-    display: flex; flex-direction: column; gap: 10px;
-    .cb-item {
-      display: flex; align-items: center; gap: 8px; cursor: pointer;
-      .cb-box {
-        width: 16px; height: 16px; border: 1px solid #D1D5DB; border-radius: 4px; display: flex; align-items: center; justify-content: center; background: #fff;
-        &.checked { background: #3B82F6; border-color: #3B82F6; }
-        .check-mark { font-size: 12px; color: white; }
-      }
-      .cb-label { font-size: 14px; color: #4B5563; }
+  .checkbox-list, .radio-list { display: flex; flex-direction: column; gap: 10px; }
+  .cb-item, .radio-item {
+    display: flex; align-items: center; gap: 8px; cursor: pointer;
+    .cb-box {
+      width: 16px; height: 16px; border: 1px solid #D1D5DB; border-radius: 4px; display: flex; align-items: center; justify-content: center; background: #fff;
+      &.checked { background: #3B82F6; border-color: #3B82F6; .check-mark { font-size: 12px; color: white; } }
     }
-  }
-  
-  .radio-list {
-    display: flex; flex-direction: column; gap: 10px;
-    .radio-item {
-      display: flex; align-items: center; gap: 8px; cursor: pointer;
-      .radio-circle { width: 16px; height: 16px; border: 1px solid #D1D5DB; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: #fff; }
-      &.active {
-        .radio-circle { border-color: #3B82F6; }
-        .radio-dot { width: 8px; height: 8px; background: #3B82F6; border-radius: 50%; }
-      }
-      .radio-label { font-size: 14px; color: #4B5563; }
+    .radio-circle {
+      width: 16px; height: 16px; border: 1px solid #D1D5DB; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: #fff;
+      .radio-dot { width: 8px; height: 8px; background: #3B82F6; border-radius: 50%; }
     }
+    &.active .radio-circle { border-color: #3B82F6; }
+    .cb-label, .radio-label { font-size: 14px; color: #4B5563; }
   }
-  
+
   .template-grid {
-    display: flex; flex-wrap: wrap; gap: 12px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    
     .tpl-card {
-      width: 80px; height: 110px; background: #F9FAFB; border: 1px solid #E5E7EB; border-radius: 6px; display: flex; flex-direction: column; align-items: center; padding: 8px 4px; box-sizing: border-box; cursor: pointer; transition: all 0.2s;
-      &.selected {
-        border-color: #3B82F6; background: #EFF6FF; box-shadow: 0 0 0 2px rgba(59,130,246,0.2);
-        .tpl-name { color: #1D4ED8; font-weight: bold; }
+      background: #fff;
+      border: 1px solid #E5E7EB;
+      border-radius: 6px;
+      padding: 8px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      transition: all 0.2s;
+      
+      &:hover { border-color: #3B82F6; }
+      &.selected { border-color: #3B82F6; background-color: #EFF6FF; }
+      
+      .tpl-thumb {
+        width: 100%;
+        height: 50px;
+        background: #F3F4F6;
+        border-radius: 4px;
+        margin-bottom: 8px;
+        .thumb-placeholder { width: 100%; height: 100%; border-radius: 4px; }
       }
-      .tpl-thumb { width: 40px; height: 54px; background: #fff; border: 1px solid #E5E7EB; margin-bottom: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
-      .tpl-name { font-size: 12px; color: #6B7280; text-align: center; line-height: 1.3; white-space: pre-wrap; }
-      &.upload-card {
-        justify-content: center;
-        .upload-icon { width: 28px; height: 28px; background: #E5E7EB; border-radius: 50%; color: #fff; font-size: 20px; display: flex; align-items: center; justify-content: center; margin-bottom: 8px; }
-      }
+      .tpl-name { font-size: 12px; color: #374151; }
     }
   }
 }
