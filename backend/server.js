@@ -21,22 +21,31 @@ const app = express();
 const PORT = 3001;
 const SECRET_KEY = 'YOUR_SECRET_KEY_CHANGE_THIS_IN_PROD'; 
 
-// --- 配置区域 ---
+// ==========================================
+// === 配置区域 ===
+// ==========================================
+
+// 1. Qwen 配置 (保留)
 const DASHSCOPE_API_KEY = 'sk-8a2cd122b7e442969aad0f1516ee68b5'; 
+
+// 2. DeepSeek 配置 (保留)
 const DEEPSEEK_API_KEY = 'sk-3mmdOmu0ssmYBLdKA75112417853451c8dE38e4602C0246f';
+const DEEPSEEK_BASE_URL = 'https://dpapi.cn/v1/chat/completions';
+const DEEPSEEK_MODEL_NAME = 'deepseek-v3'; 
+
+// 3. [新增] Gemini 配置
+const GEMINI_API_KEY = 'sk-MUVHHC0GN2AbXxokvqftsIXhceneed4l5Wbno00pJIopJN6J';
+// 假设您是在同一平台(dpapi)购买的 Key，如果不是，请更换此前缀
+const GEMINI_BASE_URL = 'https://api.vectorengine.ai/v1/chat/completions';
+const GEMINI_MODEL_NAME = 'gemini-2.5-pro';
+
+// 4. MinerU 配置 (保留)
 const MINERU_API_KEY = 'eyJ0eXBlIjoiSldUIiwiYWxnIjoiSFM1MTIifQ.eyJqdGkiOiI3NDcwMDYzNyIsInJvbCI6IlJPTEVfUkVHSVNURVIiLCJpc3MiOiJPcGVuWExhYiIsImlhdCI6MTc2OTYyMTE5MywiY2xpZW50SWQiOiJsa3pkeDU3bnZ5MjJqa3BxOXgydyIsInBob25lIjoiIiwib3BlbklkIjpudWxsLCJ1dWlkIjoiZDM1ZjNiMmItYjkxZS00ZmFlLWFmYjktM2Q0ZDkyYmFiNDM0IiwiZW1haWwiOiIiLCJleHAiOjE3NzA4MzA3OTN9.40ED1BasedSGBRIZnBNJKhXu739Rk35RSlK3GLQN61Cb1wb3FTur16Z0SmaW5r3SPSrtauPFLxP4_YRPIkvUUw';
 const MINERU_BASE_URL = 'https://mineru.net/api/v4';
 
-// DeepSeek 配置
-// 选项 A: 官方 API
-// const DEEPSEEK_BASE_URL = 'https://api.deepseek.com/chat/completions';
-// const DEEPSEEK_MODEL_NAME = 'deepseek-chat';
-
-// 选项 B: 如果使用您截图中的 dpapi (请解开下面注释并注释上面)
-const DEEPSEEK_BASE_URL = 'https://dpapi.cn/v1/chat/completions';
-const DEEPSEEK_MODEL_NAME = 'deepseek-r1'; // 或者 dpapi 支持的其他 vision 模型
-
-// 连接 MongoDB
+// ==========================================
+// === 数据库连接 ===
+// ==========================================
 const MONGO_URI = 'mongodb://127.0.0.1:27017/question-bank';
 mongoose.connect(MONGO_URI)
   .then(() => console.log('✅ MongoDB 数据库连接成功'))
@@ -105,7 +114,7 @@ const SYSTEM_PROMPT = `
 
 1. **题型与结构**：
    - **选择题**：必须使用 "##选项 N" 标签。其中 **N** 代表一行显示的选项数量（如 1, 2, 4），请根据图片排版自动判断。
-   - **解答/综合题**：若包含多个子问题（如 (1), (2)），必须为每个子问题前添加 "##小题" 标签。
+   - **解答/综合题**：若包含多个子问题（如 (1), (2)），必须为每个子问题前添加 "##小题" 标签，然后"##题干"标签用来放题干内容。
    - **嵌套选择题**：若小题内部为选择题，同样需使用 "##选项" 标签。
    - **严禁**将“选项”（A/B/C/D）识别为“小题”。
 
@@ -130,36 +139,6 @@ const SYSTEM_PROMPT = `
 6. **答案录入逻辑**：
    - 仅在明确识别到答案内容时才录入内容。
    - 若未识别到答案，保留 "##答案" 标签，但内容留空。
-
-【输出格式示例：选择题】
-##年份 2023
-##题号 1
-##题型 单选题
-##难度 2
-##题干
-已知集合 $A=\{1,2\}$，则...
-##选项 4
-A. 1  B. 2  C. 3  D. 4
-##答案
-A
-===
-
-【输出格式示例：解答题】
-##年份 2023
-##题号 17
-##题型 解答题
-##难度 3
-##题干
-<div style="margin: 10px 0;">已知函数 $f(x) = \dfrac{1}{x}$。</div>
-##小题
-(1) 求定义域；
-##小题
-(2) 求导数。
-##答案
-(1) ... 
-<br>
-(2) ...
-===
 `;
 
 // 1. Python 转图
@@ -187,6 +166,8 @@ async function callQwenVL(imagePath) {
             'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation',
             {
                 model: 'qwen-vl-max',
+                max_tokens: 81920,
+                temperature: 0.1,
                 input: {
                     messages: [
                         { role: 'user', content: [{ image: `data:image/jpeg;base64,${base64Image}` }, { text: SYSTEM_PROMPT }] }
@@ -210,7 +191,7 @@ async function callQwenVL(imagePath) {
     }
 }
 
-// 重写 callDeepSeek 支持流式输出
+// 3. DeepSeek 流式输出
 async function streamDeepSeek(imagePath, res) {
     try {
         const base64Image = fs.readFileSync(imagePath).toString('base64');
@@ -242,6 +223,7 @@ async function streamDeepSeek(imagePath, res) {
         return new Promise((resolve, reject) => {
             let buffer = '';
             response.data.on('data', (chunk) => {
+                console.log('Gemini返回:', chunk.toString());
                 buffer += chunk.toString();
                 const lines = buffer.split('\n');
                 buffer = lines.pop(); // 保留未完整的行
@@ -255,31 +237,86 @@ async function streamDeepSeek(imagePath, res) {
                             if (content) {
                                 res.write(`data: ${JSON.stringify({ t: 'txt', c: content })}\n\n`);
                             }
-                        } catch (e) {
-                            // 忽略解析错误
-                        }
+                        } catch (e) {}
                     }
                 }
             });
-            response.data.on('end', () => {
-                resolve();
-            });
-            response.data.on('error', (err) => {
-                reject(err);
-            });
+            response.data.on('end', () => resolve());
+            response.data.on('error', (err) => reject(err));
         });
     } catch (e) {
         let errMsg = e.message;
-        if (e.response) {
-            errMsg += ` (Status: ${e.response.status})`;
-        }
+        if (e.response) errMsg += ` (Status: ${e.response.status})`;
         console.error(`[DeepSeek] Stream Error:`, errMsg);
         res.write(`data: ${JSON.stringify({ t: 'err', c: 'DeepSeek Error: ' + errMsg })}\n\n`);
-        return null; // Resolve as null to not break Promise.all
+        return null; 
     }
 }
 
-// 4. MinerU 批量提取 (支持多文件)
+// 4. [新增] Gemini 流式输出 (逻辑同 DeepSeek，只换了 Key 和 Url)
+async function streamGemini(imagePath, res) {
+    try {
+        const base64Image = fs.readFileSync(imagePath).toString('base64');
+        const response = await axios.post(
+            GEMINI_BASE_URL,
+            {
+                model: GEMINI_MODEL_NAME, 
+                max_tokens: 81920,
+                temperature: 0.1,
+                messages: [
+                    { 
+                        role: 'user', 
+                        content: [
+                            { type: 'text', text: SYSTEM_PROMPT },
+                            { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
+                        ] 
+                    }
+                ],
+                stream: true
+            },
+            {
+                headers: { 
+                    'Authorization': `Bearer ${GEMINI_API_KEY}`, 
+                    'Content-Type': 'application/json' 
+                },
+                responseType: 'stream',
+                timeout: 180000
+            }
+        );
+
+        return new Promise((resolve, reject) => {
+            let buffer = '';
+            response.data.on('data', (chunk) => {
+                buffer += chunk.toString();
+                const lines = buffer.split('\n');
+                buffer = lines.pop(); 
+
+                for (const line of lines) {
+                    if (line.trim() === 'data: [DONE]') continue;
+                    if (line.startsWith('data: ')) {
+                        try {
+                            const json = JSON.parse(line.slice(6));
+                            const content = json.choices[0]?.delta?.content || '';
+                            if (content) {
+                                res.write(`data: ${JSON.stringify({ t: 'txt', c: content })}\n\n`);
+                            }
+                        } catch (e) {}
+                    }
+                }
+            });
+            response.data.on('end', () => resolve());
+            response.data.on('error', (err) => reject(err));
+        });
+    } catch (e) {
+        let errMsg = e.message;
+        if (e.response) errMsg += ` (Status: ${e.response.status})`;
+        console.error(`[Gemini] Stream Error:`, errMsg);
+        res.write(`data: ${JSON.stringify({ t: 'err', c: 'Gemini Error: ' + errMsg })}\n\n`);
+        return null; 
+    }
+}
+
+// 5. MinerU 批量提取
 async function runMinerUBatch(imagePaths) {
     try {
         if (!imagePaths || imagePaths.length === 0) return {};
@@ -357,6 +394,7 @@ app.post('/api/smart-ocr', authenticateToken, upload.single('file'), async (req,
     
     const filePath = req.file.path; 
     const isPdf = req.file.mimetype === 'application/pdf';
+    // 前端如果传 'Gemini'，则使用 Gemini 模型
     const model = req.query.model || req.body.model || 'Qwen'; 
     
     try {
@@ -389,7 +427,11 @@ app.post('/api/smart-ocr', authenticateToken, upload.single('file'), async (req,
 
                 if (model === 'DeepSeek') {
                     await streamDeepSeek(imgPath, res);
+                } else if (model === 'Gemini 2.5 Pro') {  
+                    // [新增] 调用 Gemini
+                    await streamGemini(imgPath, res);
                 } else {
+                    // 默认使用 Qwen
                     const txt = await callQwenVL(imgPath);
                     if (txt) res.write(`data: ${JSON.stringify({ t: 'txt', c: txt })}\n\n`);
                 }
