@@ -395,6 +395,11 @@
         v-model:visible="showExportModal" 
         :questions="questionsForExport"
     />
+    
+    <ExportWordModal 
+        v-model:visible="showWordExportModal" 
+        :questions="questionsForExport"
+    />
 
     <QuestionBasketModal 
         :isOpen="activeBasketId !== null"
@@ -444,6 +449,7 @@ import LatexText from '@/components/LatexText.vue';
 import Whiteboard from '@/components/Whiteboard.vue';
 import AddQuestionModal from '@/components/AddQuestionModal.vue';
 import ExportQuestionsModal from '@/components/ExportQuestionsModal.vue';
+import ExportWordModal from '@/components/ExportWordModal.vue';
 import ManageSubjectModal from '@/components/ManageSubjectModal.vue';
 import ManageContentModal from '@/components/ManageContentModal.vue';
 import QuestionBasketModal from '@/components/QuestionBasketModal.vue';
@@ -488,6 +494,7 @@ const showAddModal = ref(false);
 const showSubjectModal = ref(false);
 const showContentModal = ref(false);
 const showExportModal = ref(false);
+const showWordExportModal = ref(false);
 const addModalRef = ref(null);
 
 const activeBasketId = ref(null);
@@ -769,7 +776,7 @@ const toggleWaiting = (id) => waitingBasketKey.value = waitingBasketKey.value ==
 const handleKeyBasket = (e) => { if(waitingBasketKey.value && e.key >= '1' && e.key <= '7') { const k = parseInt(e.key); const q = questions.value.find(x => x.id === waitingBasketKey.value); if(q && !baskets.value[k].find(x => x.id === q.id)) baskets.value[k].push(q); waitingBasketKey.value = null; } if(e.key === 'Escape') waitingBasketKey.value = null; };
 const removeFromBasket = (bid, qid) => baskets.value[bid] = baskets.value[bid].filter(x => x.id !== qid);
 const handleExportPdf = () => { showExportModal.value = true; };
-const handleExportWord = () => { showExportModal.value = true; };
+const handleExportWord = () => { showWordExportModal.value = true; };
 const handleGlobalClick = (e) => { manageMenuOpen.value = false; subjectDropdownOpen.value = false; showJumpPopover.value = false; };
 
 // --- 5. Watchers & Computed ---

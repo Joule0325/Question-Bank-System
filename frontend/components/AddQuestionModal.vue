@@ -224,7 +224,9 @@
             <view class="model-select">
                 <text>模型:</text>
                 <select v-model="selectedModel" class="model-dropdown">
-                    <option v-for="m in modelOptions" :key="m" :value="m">{{ m }}</option>
+                    <option v-for="m in modelOptions" :key="m.value" :value="m.value">
+                        {{ m.label }}
+                    </option>
                 </select>
             </view>
             <view class="win-close-btn" @click="closeOCRModal">✕</view>
@@ -315,7 +317,12 @@ const ocrResult = ref('');
 // Floating Window State
 const ocrWindow = reactive({ x: 100, y: 100, width: 600, height: 500, isDragging: false, isResizing: false, startX: 0, startY: 0, initialW: 0, initialH: 0 });
 const selectedModel = ref('Qwen');
-const modelOptions = ['Qwen', 'DeepSeek'];
+const modelOptions = [
+  { label: 'Qwen (通义千问)', value: 'Qwen' },
+  { label: 'DeepSeek V3', value: 'DeepSeek' },
+  { label: 'Gemini 2.5 Pro', value: 'Gemini' } // label给人看，value给后端
+];
+
 
 const getClientX = (e) => e.clientX ?? (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
 const getClientY = (e) => e.clientY ?? (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
