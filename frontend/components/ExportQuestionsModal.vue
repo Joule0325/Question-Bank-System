@@ -3,52 +3,42 @@
     <view class="export-modal-container">
       
       <view class="modal-header">
-        <view class="mode-switch">
+        <view class="header-left-controls">
           <view 
-            class="switch-item" 
-            :class="{ active: mode === 'word' }"
-            @click="setMode('word')"
+            class="h-btn" 
+            :class="{ primary: viewMode === 'code' }" 
+            @click="viewMode = 'code'"
           >
-            Word 模式
+            LaTeX 源码
           </view>
           <view 
-            class="switch-item" 
-            :class="{ active: mode === 'latex' }"
-            @click="setMode('latex')"
+            class="h-btn" 
+            :class="{ primary: viewMode === 'preview' }" 
+            @click="viewMode = 'preview'"
           >
-            LaTeX 模式
+            预览
+          </view>
+          <view class="h-btn outline primary" @click="handleCompile">
+            <text v-if="isCompiling">⏳ </text>
+            {{ isCompiling ? '编译中...' : '编译' }}
           </view>
         </view>
+
         <view class="header-actions">
-          <button class="action-btn primary" @click="handleExport" :disabled="isExporting">
+          <view 
+            class="h-btn primary" 
+            @click="handleExport" 
+            :class="{ disabled: isExporting }"
+          >
             {{ isExporting ? '打包中...' : '导出 ZIP' }}
-          </button>
-          <button class="action-btn danger" @click="close">关闭</button>
+          </view>
+          <view class="h-btn" @click="close">关闭</view>
         </view>
       </view>
 
       <view class="modal-body">
         
         <view class="col col-source">
-          <view class="col-title tab-header">
-            <view 
-              class="tab-item" 
-              :class="{ active: viewMode === 'code' }"
-              @click="viewMode = 'code'"
-            >
-              LaTeX 源码
-            </view>
-            <view class="divider">|</view>
-            <view 
-              class="tab-item" 
-              :class="{ active: viewMode === 'preview' }"
-              @click="handleCompile"
-            >
-              <text v-if="isCompiling">⏳ 编译中...</text>
-              <text v-else>👁️ 编译预览</text>
-            </view>
-          </view>
-
           <textarea 
             v-show="viewMode === 'code'"
             class="source-editor" 
@@ -73,7 +63,7 @@
                   <text>{{ compileError }}</text>
                 </scroll-view>
               </view>
-              <text v-else>点击上方“编译预览”查看 PDF</text>
+              <text v-else>点击左上角“编译”按钮生成预览</text>
             </view>
           </view>
         </view>
@@ -83,12 +73,13 @@
           <scroll-view scroll-y class="settings-scroll">
             
             <view class="setting-group">
-              <text class="group-label">试卷标题</text>
-              <view class="input-row">
-                <input class="custom-input" v-model="titles.main" placeholder="主标题 (如: 2026模拟考)" @input="debounceGenerate" />
+              <view class="input-line">
+                <text class="input-label">主标题</text>
+                <input class="custom-input" v-model="titles.main" placeholder="如: 2026模拟考" @input="debounceGenerate" />
               </view>
-              <view class="input-row" style="margin-top: 8px;">
-                <input class="custom-input" v-model="titles.sub" placeholder="副标题 (如: 物理试题)" @input="debounceGenerate" />
+              <view class="input-line">
+                <text class="input-label">副标题</text>
+                <input class="custom-input" v-model="titles.sub" placeholder="如: 物理试题" @input="debounceGenerate" />
               </view>
             </view>
 
@@ -103,7 +94,9 @@
                   @click="selectTemplate(tpl)"
                 >
                   <view class="tpl-thumb">
-                    <view class="thumb-placeholder" :style="{ background: selectedTplId === tpl.id ? '#E0F2FE' : '#F3F4F6' }"></view>
+                    <view class="thumb-lines">
+                       <view class="tl"></view><view class="tl"></view><view class="tl short"></view>
+                    </view>
                   </view>
                   <text class="tpl-name">{{ tpl.name }}</text>
                 </view>
@@ -112,7 +105,7 @@
 
             <view class="setting-group">
               <text class="group-label">试题属性 (显示在题干前)</text>
-              <view class="checkbox-list">
+              <view class="checkbox-list horizontal">
                 <view 
                   class="cb-item" 
                   v-for="opt in metadataOpts" 
@@ -129,7 +122,7 @@
 
             <view class="setting-group">
               <text class="group-label">包含内容</text>
-              <view class="checkbox-list">
+              <view class="checkbox-list horizontal">
                 <view class="cb-item" @click="toggleContent('answer')">
                   <view class="cb-box" :class="{ checked: contentSettings.answer }"><text v-if="contentSettings.answer" class="check-mark">✓</text></view>
                   <text class="cb-label">答案</text>
@@ -147,7 +140,7 @@
             
             <view class="setting-group">
               <text class="group-label">答案位置</text>
-              <view class="radio-list">
+              <view class="radio-list horizontal">
                 <view 
                   class="radio-item" 
                   :class="{ active: answerPos === 'end' }"
@@ -188,7 +181,7 @@ const props = defineProps({
 
 const emit = defineEmits(['update:visible', 'export']);
 
-const mode = ref('latex');
+// 状态管理
 const sourceCode = ref('');
 const isExporting = ref(false);
 const viewMode = ref('code'); 
@@ -252,22 +245,21 @@ const resolveImageInfo = (rawUrl) => {
   return { saveFilename, downloadUrl };
 };
 
-// [终极修复版] 内容处理：
-// 修复：使用 \hspace{2em} 强制缩进，替代无效的 \indent
+// 内容处理：HTML 转 LaTeX
 const processContent = (text, imgCallback) => {
    if (!text) return '';
    
    const placeholders = [];
    let processed = text;
 
-   // 1. 提取 Markdown 图片 -> 存入占位符 (无下划线)
+   // 1. 提取 Markdown 图片
    processed = processed.replace(/!\[.*?\]\((.*?)\)/g, (match, url) => {
        const ph = `IMGPH${placeholders.length}END`;
        placeholders.push({ type: 'md', url, pos: 'l' });
        return ph;
    });
 
-   // 2. 提取系统格式图片 [img:url:pos:scale] -> 存入占位符
+   // 2. 提取系统格式图片
    const imgRegex = /\[img:(.*?):([lmr]):(\d+)\]/g;
    processed = processed.replace(imgRegex, (match, url, pos, scale) => {
        const ph = `IMGPH${placeholders.length}END`;
@@ -280,47 +272,32 @@ const processContent = (text, imgCallback) => {
    processed = parts.map((part, idx) => {
        if (idx % 2 === 1) return part; // 公式不转义
        
-       // 预处理 HTML 换行
-       let p = part.replace(/<br\s*\/?>/gi, ' \\newline ').replace(/&nbsp;/g, ' ');
+       let p = part.replace(/<br\s*\/?>/gi, ' ').replace(/&nbsp;/g, ' ');
        
-       // 转义 LaTeX 特殊字符
        return p.replace(/([#%&_{}])/g, '\\$1')
                .replace(/\^/g, '\\textasciicircum ')
                .replace(/~/g, '\\textasciitilde ');
    }).join('');
 
-   // 4. 解析 HTML 样式 -> 转换为 LaTeX 命令
-   // 修复：text-indent 改用 \hspace{2em}
+   // 4. 解析 HTML 样式 -> LaTeX 命令
    processed = processed.replace(/<(div|p|span)[^>]*style="([^"]+)"[^>]*>([\s\S]*?)<\/\1>/gi, (match, tag, style, content) => {
        let result = content;
-       
-       // 检测样式关键字 (忽略大小写)
        const isBold = /font-weight:\s*bold/i.test(style);
        const isCenter = /text-align:\s*center/i.test(style);
-       // 关键修改：检测首行缩进
        const isIndent = /text-indent:\s*2em/i.test(style);
        
-       // 应用 LaTeX 样式
-       if (isBold) {
-           result = `\\textbf{${result}}`;
-       }
-       if (isCenter) {
-           // 使用 center 环境
-           result = `\\par \\begin{center} ${result} \\end{center} \\par`;
-       }
-       // 修复：强制插入 2em 空白
-       if (isIndent) {
-           result = `\\par \\hspace{2em} ${result}`;
-       }
+       if (isBold) result = `\\textbf{${result}}`;
+       if (isCenter) result = `\\par \\begin{center} ${result} \\end{center} \\par`;
+       if (isIndent) result = `\\par \\hspace{2em} ${result}`;
        
        return result;
    });
 
-   // 5. 清理剩余的无样式 HTML 标签
+   // 5. 清理 HTML 标签
    processed = processed.replace(/<\/?(div|p)>/gi, ' \\par ');
    processed = processed.replace(/<\/?span>/gi, ' ');
 
-   // 6. 还原图片 (根据 pos 生成环境)
+   // 6. 还原图片
    placeholders.forEach((item, index) => {
        const ph = `IMGPH${index}END`;
        let latex = '';
@@ -336,14 +313,9 @@ const processContent = (text, imgCallback) => {
            
            const imgCmd = `\\includegraphics[width=${widthScale}\\linewidth,keepaspectratio]{images/${saveFilename}}`;
            
-           // 根据对齐方式包裹
-           if (item.pos === 'm') { // 居中
-               latex = `\\par \\begin{center} ${imgCmd} \\end{center} \\par`;
-           } else if (item.pos === 'r') { // 右对齐
-               latex = `\\par {\\raggedleft ${imgCmd} \\par}`;
-           } else { // 左对齐
-               latex = ` ${imgCmd} `;
-           }
+           if (item.pos === 'm') latex = `\\par \\begin{center} ${imgCmd} \\end{center} \\par`;
+           else if (item.pos === 'r') latex = `\\par {\\raggedleft ${imgCmd} \\par}`;
+           else latex = ` ${imgCmd} `;
        }
        processed = processed.replace(ph, latex);
    });
@@ -416,32 +388,27 @@ const generateLatex = () => {
 
   if (props.questions && props.questions.length > 0) {
     props.questions.forEach((q, index) => {
-      // 1. 属性拼接
+      // 1. 属性
       let prefixParts = [];
       if (metadata.year && q.year) prefixParts.push(q.year);
       if (metadata.province && q.province) prefixParts.push(q.province);
       if (metadata.source && q.source) prefixParts.push(q.source);
       let prefixStr = prefixParts.join('');
-
       let diffStr = (metadata.difficulty && q.difficulty) ? `${q.difficulty}星` : '';
-      
       let finalAttr = '';
-      if (prefixStr && diffStr) {
-          finalAttr = `(${prefixStr} ${diffStr})`; 
-      } else if (prefixStr || diffStr) {
-          finalAttr = `(${prefixStr}${diffStr})`;
-      }
+      if (prefixStr && diffStr) finalAttr = `(${prefixStr} ${diffStr})`; 
+      else if (prefixStr || diffStr) finalAttr = `(${prefixStr}${diffStr})`;
 
       // 2. 题干
       const qTitle = processContent(q.title || '', (n, u) => imageAssets[n] = u);
       content += `\\noindent\\textbf{${index + 1}.} ${finalAttr ? '\\small ' + finalAttr + ' \\normalsize ' : ''}${qTitle}\n\n`;
 
-      // 3. 题目选项
+      // 3. 选项
       if (q.options && (q.options.A || q.options.B)) {
           content += formatOptions(q.options, q.optionLayout) + '\n\n';
       }
 
-      // 4. 小题处理
+      // 4. 小题
       if (q.subQuestions && q.subQuestions.length > 0) {
           q.subQuestions.forEach(sub => {
               const subContent = processContent(sub.content || '', (n, u) => imageAssets[n] = u);
@@ -452,7 +419,7 @@ const generateLatex = () => {
           });
       }
 
-      // 5. 答案跟随模式
+      // 5. 答案跟随
       if (answerPos.value === 'question') {
           let extras = buildAnswerBlock(q);
           if (extras.length > 0) {
@@ -467,7 +434,7 @@ const generateLatex = () => {
     });
   }
 
-  // 6. 试卷末尾的参考答案
+  // 6. 参考答案
   if (answerPos.value === 'end' && props.questions.length > 0) {
       if (contentSettings.answer || contentSettings.analysis || contentSettings.detailed) {
           content += `\\newpage\n\\section*{参考答案}\n`;
@@ -485,10 +452,9 @@ const generateLatex = () => {
   sourceCode.value = content;
 };
 
-// 辅助：构建答案块文本
+// 辅助：构建答案块
 const buildAnswerBlock = (q) => {
     let parts = [];
-    
     if (q.subQuestions && q.subQuestions.length > 0) {
         let subAns = [], subAna = [], subDet = [];
         q.subQuestions.forEach((sub, idx) => {
@@ -496,11 +462,9 @@ const buildAnswerBlock = (q) => {
             if (contentSettings.analysis && sub.analysis) subAna.push(`(${idx+1}) ${processContent(sub.analysis, (n,u)=>imageAssets[n]=u)}`);
             if (contentSettings.detailed && sub.detailed) subDet.push(`(${idx+1}) ${processContent(sub.detailed, (n,u)=>imageAssets[n]=u)}`);
         });
-        
         if (subAns.length > 0) parts.push(`\\textbf{【答案】} ${subAns.join('；')}`);
         if (subAna.length > 0) parts.push(`\\textbf{【解析】} ${subAna.join('；')}`);
         if (subDet.length > 0) parts.push(`\\textbf{【详解】} ${subDet.join('；')}`);
-        
     } else {
         if (contentSettings.answer && q.answer) parts.push(`\\textbf{【答案】} ${cleanTex(q.answer)}`);
         if (contentSettings.analysis && q.analysis) parts.push(`\\textbf{【解析】} ${processContent(q.analysis, (n,u)=>imageAssets[n]=u)}`);
@@ -564,7 +528,6 @@ const handleExport = async () => {
 };
 
 const close = () => { emit('update:visible', false); };
-const setMode = (m) => { mode.value = m; };
 const toggleMeta = (key) => { metadata[key] = !metadata[key]; debounceGenerate(); };
 const toggleContent = (key) => { contentSettings[key] = !contentSettings[key]; debounceGenerate(); };
 const selectTemplate = (tpl) => { selectedTplId.value = tpl.id; debounceGenerate(); };
@@ -575,11 +538,6 @@ watch(answerPos, generateLatex);
 </script>
 
 <style lang="scss" scoped>
-/* 样式保持不变 */
-.export-modal-container {
-  font-family: "Times New Roman", "Songti SC", "SimSun", serif;
-}
-
 .export-modal-mask {
   position: fixed;
   inset: 0;
@@ -597,61 +555,80 @@ watch(answerPos, generateLatex);
   height: auto;
   max-height: 85vh;
   background-color: #F3F4F6;
-  border-radius: 12px;
+  border-radius: 4px;
   display: flex;
   flex-direction: column;
-  padding: 16px;
-  gap: 16px;
+  padding: 12px;
+  gap: 12px;
   box-shadow: 0 10px 25px rgba(0,0,0,0.2);
   overflow: hidden;
+  font-family: "Times New Roman", "Songti SC", "SimSun", serif;
 }
 
 .modal-header {
-  height: 60px;
+  height: 45px;
   background: #FFFFFF;
-  border-radius: 8px;
+  border-radius: 4px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 20px;
+  padding: 0 15px;
   flex-shrink: 0;
 }
 
-.mode-switch {
+/* 左侧控制区布局 */
+.header-left-controls {
   display: flex;
-  background: #F3F4F6;
+  gap: 10px;
+}
+
+/* 按钮样式 (仿照 ManageContentModal) */
+.h-btn {
+  padding: 3px 12px;
   border-radius: 6px;
-  padding: 2px;
-  .switch-item {
-    padding: 6px 16px; font-size: 14px; color: #4B5563; cursor: pointer; border-radius: 4px; transition: all 0.2s;
-    &.active { background: #3B82F6; color: #FFFFFF; font-weight: bold; }
+  font-size: 13px;
+  cursor: pointer;
+  background: #f1f5f9;
+  color: #64748b;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  
+  &:hover { background: #e2e8f0; }
+  
+  &.primary { 
+    background: #2563eb; 
+    color: white; 
+    &:hover { background: #1d4ed8; }
+  }
+  
+  &.outline { 
+    background: transparent; 
+    border: 1px solid #2563eb; 
+    color: #2563eb; 
+    box-sizing: border-box; 
+    &:hover { background: rgba(37, 99, 235, 0.05); }
+  }
+  
+  &.disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
   }
 }
 
 .header-actions {
-  display: flex; gap: 12px;
-  .action-btn {
-    padding: 8px 20px; border-radius: 6px; font-size: 14px; border: none; cursor: pointer; color: white;
-    &.primary { background: #10B981; &:hover { background: #059669; } &:disabled { background: #6EE7B7; } }
-    &.danger { background: #EF4444; &:hover { background: #DC2626; } }
-  }
+  display: flex; 
+  gap: 12px;
 }
 
-.modal-body { flex: 1; display: flex; gap: 16px; overflow: hidden; }
+.modal-body { flex: 1; display: flex; gap: 12px; overflow: hidden; }
 
 .col { background: #FFFFFF; border-radius: 8px; display: flex; flex-direction: column; overflow: hidden; }
 
 .col-title {
-  height: 40px; background: #F9FAFB; border-bottom: 1px solid #E5E7EB; display: flex; align-items: center; font-size: 14px; font-weight: bold; color: #374151; flex-shrink: 0;
-  &.tab-header {
-    justify-content: flex-start; padding: 0;
-    .tab-item {
-      height: 100%; padding: 0 20px; display: flex; align-items: center; cursor: pointer; color: #6B7280;
-      &:hover { background: #F3F4F6; }
-      &.active { color: #3B82F6; font-weight: bold; background: #FFFFFF; border-bottom: 2px solid #3B82F6; }
-    }
-    .divider { color: #E5E7EB; margin: 0 5px; font-weight: normal; }
-  }
+  height: 40px; background: #F9FAFB; border-bottom: 1px solid #E5E7EB; display: flex; align-items: center; font-size: 14px; font-weight: bold; color: #374151; flex-shrink: 0; padding-left: 15px;
 }
 
 .col-source {
@@ -669,56 +646,131 @@ watch(answerPos, generateLatex);
   }
 }
 
+/* --- 修改位置：frontend/components/ExportQuestionsModal.vue 的 <style> --- */
+
 .col-settings {
-  width: 300px;
-  .settings-scroll { flex: 1; padding: 16px; box-sizing: border-box; }
-  .setting-group { margin-bottom: 24px; }
-  .group-label { font-size: 13px; font-weight: bold; color: #374151; margin-bottom: 12px; display: block; }
-  .custom-input { width: 100%; padding: 8px; border: 1px solid #D1D5DB; border-radius: 4px; font-size: 14px; box-sizing: border-box; }
+  width: 330px;
+  background: #FFFFFF;
+  border-left: 1px solid #E5E7EB;
+  /* 确保它是 Flex 列布局，且限制溢出 */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   
-  .checkbox-list, .radio-list { display: flex; flex-direction: column; gap: 10px; }
-  .cb-item, .radio-item {
-    display: flex; align-items: center; gap: 8px; cursor: pointer;
-    .cb-box {
-      width: 16px; height: 16px; border: 1px solid #D1D5DB; border-radius: 4px; display: flex; align-items: center; justify-content: center; background: #fff;
-      &.checked { background: #3B82F6; border-color: #3B82F6; .check-mark { font-size: 12px; color: white; } }
+  /* 核心修改：让滚动区域正确填充剩余空间并触发滚动 */
+  .settings-scroll { 
+    flex: 1; 
+    height: 0; /* 关键：强制高度由 flex 决定，而不是内容撑开 */
+    padding: 20px 0px 20px 20px; 
+    box-sizing: border-box; 
+    overflow-y: auto; /* 确保出现滚动条 */
+  }
+  
+  .setting-group { margin-bottom: 24px; margin-right: 20px;}
+  
+  .group-label { 
+    font-size: 13px; font-weight: bold; color: #1e293b; margin-bottom: 10px; display: block; 
+  }
+
+  /* 标题输入行样式 */
+  .input-line {
+    display: flex;
+    align-items: center;
+    margin-bottom: 10px;
+    
+    .input-label {
+      width: 50px;
+      font-size: 13px;
+      color: #64748b;
+      font-weight: 500;
+      flex-shrink: 0;
     }
+    
+    .custom-input { 
+      flex: 1; 
+      height: 25px; 
+      padding: 0 10px; 
+      border: 1px solid #E2E8F0; 
+      border-radius: 4px; 
+      font-size: 12px; 
+      background: #F8FAFC;
+      transition: all 0.2s;
+      
+      &:focus {
+        background: #FFFFFF;
+        border-color: #3B82F6;
+        box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+      }
+    }
+  }
+  
+  /* 复选框/单选框列表 */
+  .checkbox-list, .radio-list { 
+    display: flex; 
+    gap: 12px;
+    
+    /* 横向排列 */
+    &.horizontal {
+      flex-direction: row;
+      flex-wrap: wrap;
+    }
+  }
+  
+  .cb-item, .radio-item {
+    display: flex; align-items: center; gap: 6px; cursor: pointer;
+    background: #F8FAFC; padding: 3px 3px; border-radius: 6px; border: 1px solid transparent;
+    transition: all 0.2s;
+    
+    &:hover { background: #F1F5F9; }
+    
+    .cb-box {
+      width: 16px; height: 16px; border: 1px solid #CBD5E1; border-radius: 4px; 
+      display: flex; align-items: center; justify-content: center; background: #fff;
+      &.checked { background: #3B82F6; border-color: #3B82F6; .check-mark { font-size: 12px; color: white; line-height: 1; } }
+    }
+    
     .radio-circle {
-      width: 16px; height: 16px; border: 1px solid #D1D5DB; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: #fff;
+      width: 16px; height: 16px; border: 1px solid #CBD5E1; border-radius: 50%; 
+      display: flex; align-items: center; justify-content: center; background: #fff;
       .radio-dot { width: 8px; height: 8px; background: #3B82F6; border-radius: 50%; }
     }
     &.active .radio-circle { border-color: #3B82F6; }
-    .cb-label, .radio-label { font-size: 14px; color: #4B5563; }
+    
+    .cb-label, .radio-label { font-size: 13px; color: #475569; }
   }
 
+  /* 模板网格 */
   .template-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(3, 1fr);
     gap: 10px;
     
     .tpl-card {
       background: #fff;
-      border: 1px solid #E5E7EB;
-      border-radius: 6px;
-      padding: 8px;
+      border: 1px solid #E2E8F0;
+      border-radius: 4px;
+      padding: 6px 10px;
       cursor: pointer;
       display: flex;
       flex-direction: column;
       align-items: center;
       transition: all 0.2s;
       
-      &:hover { border-color: #3B82F6; }
+      &:hover { border-color: #93C5FD; transform: translateY(-1px); box-shadow: 0 2px 5px rgba(0,0,0,0.03); }
       &.selected { border-color: #3B82F6; background-color: #EFF6FF; }
       
       .tpl-thumb {
         width: 100%;
-        height: 50px;
-        background: #F3F4F6;
+        height: 80px;
+        background: #F1F5F9;
         border-radius: 4px;
         margin-bottom: 8px;
-        .thumb-placeholder { width: 100%; height: 100%; border-radius: 4px; }
+        display: flex; flex-direction: column; justify-content: center; padding: 6px; box-sizing: border-box; gap: 4px;
+        
+        .thumb-lines .tl { height: 2px; background: #CBD5E1; width: 100%; margin-bottom: 3px; border-radius: 2px; }
+        .thumb-lines .tl.short { width: 60%; }
       }
-      .tpl-name { font-size: 12px; color: #374151; }
+      .tpl-name { font-size: 12px; color: #475569; text-align: center; white-space: nowrap; transform: scale(0.95); }
     }
   }
 }
