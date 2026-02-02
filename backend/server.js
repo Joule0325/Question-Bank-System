@@ -637,6 +637,7 @@ app.post('/api/compile', async (req, res) => {
                 const destPath = path.join(imagesDir, safeFilename);
                 let img = null;
                 try {
+                    // 处理本地上传的图片路径
                     if (url.includes('/uploads/')) {
                         try {
                             const urlPart = url.split('/uploads/')[1];
@@ -647,12 +648,16 @@ app.post('/api/compile', async (req, res) => {
                             }
                         } catch (localErr) {}
                     }
+                    // 处理网络图片
                     if (!img) img = await Jimp.read(url);
+                    
                     if (img) {
                         await img.write(destPath); 
+                        // 替换源码中的图片路径
                         sourceCode = sourceCode.split(originalSaveFilename).join(safeFilename);
                     }
                 } catch (err) {
+                    // 图片加载失败兜底：生成一个空白占位图，防止编译报错
                     new Jimp({ width: 100, height: 100, color: 0xFFFFFFFF }).write(destPath);
                     sourceCode = sourceCode.split(originalSaveFilename).join(safeFilename);
                 }
@@ -661,17 +666,35 @@ app.post('/api/compile', async (req, res) => {
 
         fs.writeFileSync(texFile, sourceCode);
         const cmd = `xelatex -interaction=nonstopmode -output-directory="." "paper.tex"`;
-        exec(cmd, { cwd: jobDir }, (error, stdout, stderr) => {
-            if (error) {
+        
+        // ================== 修改开始 ==================
+        // 第一遍编译：生成 .aux 辅助文件（计算页码）
+        exec(cmd, { cwd: jobDir }, (error1, stdout, stderr) => {
+            if (error1) {
                 const logFile = path.join(jobDir, `paper.log`);
                 let logContent = "无日志文件";
                 if (fs.existsSync(logFile)) { logContent = fs.readFileSync(logFile, 'utf-8'); }
-                return res.status(500).json({ error: '编译失败', log: logContent.slice(-3000) });
+                // 如果第一次就彻底失败（语法错误），直接返回错误
+                return res.status(500).json({ error: '编译失败 (Pass 1)', log: logContent.slice(-3000) });
             }
-            const protocol = req.protocol;
-            const host = req.get('host');
-            res.json({ url: `${protocol}://${host}/temp/job_${timestamp}/${pdfFilename}` });
+
+            // 第二遍编译：读取 .aux 文件，正确填入总页数引用
+            exec(cmd, { cwd: jobDir }, (error2, stdout, stderr) => {
+                if (error2) {
+                    const logFile = path.join(jobDir, `paper.log`);
+                    let logContent = "无日志文件";
+                    if (fs.existsSync(logFile)) { logContent = fs.readFileSync(logFile, 'utf-8'); }
+                    return res.status(500).json({ error: '编译失败 (Pass 2)', log: logContent.slice(-3000) });
+                }
+
+                // 编译成功，返回 PDF 地址
+                const protocol = req.protocol;
+                const host = req.get('host');
+                res.json({ url: `${protocol}://${host}/temp/job_${timestamp}/${pdfFilename}` });
+            });
         });
+        // ================== 修改结束 ==================
+
     } catch (e) {
         console.error('[Compile] Server Error:', e);
         res.status(500).json({ error: e.message });
