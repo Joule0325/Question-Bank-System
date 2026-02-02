@@ -31,61 +31,66 @@
             <view v-for="(groupList, groupName) in groupedQuestions" :key="groupName" class="q-group">
                 <view class="group-label">{{ groupName }} ({{ groupList.length }})</view>
                 
-                <view v-for="(q, idx) in groupList" :key="q.id" class="mini-card">
-                    <view class="mc-top">
+                <view v-for="(q, idx) in groupList" :key="q.id" class="q-card">
+                    <view class="q-header">
                         <text class="mc-idx">#{{ idx + 1 }}</text>
                         <text class="mc-del" @click="$emit('remove', q.id)">✕ 移出</text>
                     </view>
                     
-                    <view class="mc-content" @click="toggleAnswer(q.id)">
-                        <view v-if="q.image && q.imgPosCode.startsWith('u')" class="mc-img" :class="q.imgAlign">
-                            <image :src="q.image" mode="widthFix" />
-                        </view>
-                        
-                        <view class="mc-text"><LatexText :text="q.title" /></view>
-                        
-                        <view v-if="q.image && q.imgPosCode.startsWith('m')" class="mc-img" :class="q.imgAlign">
-                            <image :src="q.image" mode="widthFix" />
-                        </view>
-                        
-                        <view v-if="q.subQuestions && q.subQuestions.length > 0" class="mc-sub-list">
-                            <view v-for="(subQ, sIdx) in q.subQuestions" :key="sIdx" class="mc-sub-item">
-                                <view class="mc-sub-text">
-                                    <LatexText :text="subQ.content" />
-                                </view>
-                                
-                                <view v-if="subQ.options && Object.keys(subQ.options).length > 0" 
-                                      class="mc-opts mt-1" 
-                                      :style="'grid-template-columns: repeat('+(subQ.optionLayout||4)+',1fr)'">
-                                    <view v-for="(val, k) in subQ.options" :key="k" class="mc-opt-item">
-                                        <text class="b">{{k}}.</text><LatexText :text="val" />
+                    <view class="q-body" @click="toggleAnswer(q.id)">
+                        <view class="content-wrapper" :style="dynamicFontStyle">
+                            <view v-if="q.image && q.imgPosCode.startsWith('u')" class="img-container" :class="'align-'+(q.imgAlign||'center')">
+                                <image :src="q.image" mode="widthFix" class="q-image" />
+                            </view>
+                            
+                            <view class="q-title"><LatexText :text="q.title" /></view>
+                            
+                            <view v-if="q.image && q.imgPosCode.startsWith('m')" class="img-container" :class="'align-'+(q.imgAlign||'center')">
+                                <image :src="q.image" mode="widthFix" class="q-image" />
+                            </view>
+                            
+                            <view v-if="q.subQuestions && q.subQuestions.length > 0" class="sub-q-list-view">
+                                <view v-for="(subQ, sIdx) in q.subQuestions" :key="sIdx" class="sub-q-row">
+                                    <view class="sub-q-txt">
+                                        <text class="sub-idx">{{ formatSubIndex(sIdx + 1) }}</text>
+                                        <view style="flex:1;"><LatexText :text="subQ.content" /></view>
+                                    </view>
+                                    
+                                    <view v-if="subQ.options && Object.keys(subQ.options).length > 0" 
+                                          class="opt-grid mt-2 sub-indent" 
+                                          :style="'grid-template-columns: repeat('+(subQ.optionLayout||4)+',1fr)'">
+                                        <view v-for="(val, k) in subQ.options" :key="k" class="opt-item" :style="{ marginTop: globalConfig.optionMargin + 'px' }">
+                                            <text class="opt-key">{{ formatOptionLabel(k) }}</text>
+                                            <view class="opt-val"><LatexText :text="val" /></view>
+                                        </view>
+                                    </view>
+
+                                    <view v-if="showAnswerMap[q.id] && subQ.answer" class="sub-q-ans-box">
+                                        <text class="ans-label">小题答案</text>
+                                        <LatexText :text="subQ.answer" />
                                     </view>
                                 </view>
+                            </view>
 
-                                <view v-if="showAnswerMap[q.id] && subQ.answer" class="mc-sub-ans">
-                                    <text class="tag">小题答案</text>
-                                    <LatexText :text="subQ.answer" />
+                            <view v-else-if="q.options && typeof q.options === 'object'" class="opt-grid" :style="'grid-template-columns: repeat('+(q.optionLayout||4)+',1fr)'">
+                                <view v-for="(val, k) in q.options" :key="k" class="opt-item" :style="{ marginTop: globalConfig.optionMargin + 'px' }">
+                                    <text class="opt-key">{{ formatOptionLabel(k) }}</text>
+                                    <view class="opt-val"><LatexText :text="val" /></view>
                                 </view>
                             </view>
-                        </view>
 
-                        <view v-else-if="q.options && typeof q.options === 'object'" class="mc-opts" :style="'grid-template-columns: repeat('+(q.optionLayout||4)+',1fr)'">
-                            <view v-for="(val, k) in q.options" :key="k" class="mc-opt-item">
-                                <text class="b">{{k}}.</text><LatexText :text="val" />
+                            <view v-if="q.image && q.imgPosCode.startsWith('b')" class="img-container" :class="'align-'+(q.imgAlign||'center')">
+                                <image :src="q.image" mode="widthFix" class="q-image" />
                             </view>
-                        </view>
+                            <view v-if="q.image && q.imgPosCode === 'r'" class="img-container align-center">
+                                <image :src="q.image" mode="widthFix" class="q-image" />
+                            </view>
 
-                        <view v-if="q.image && q.imgPosCode.startsWith('b')" class="mc-img" :class="q.imgAlign">
-                            <image :src="q.image" mode="widthFix" />
-                        </view>
-                        <view v-if="q.image && q.imgPosCode === 'r'" class="mc-img center">
-                            <image :src="q.image" mode="widthFix" />
-                        </view>
-
-                        <view v-if="showAnswerMap[q.id]" class="mc-ans-box">
-                             <view v-if="q.answer" class="mb-1"><text class="tag">参考答案</text><LatexText :text="q.answer"/></view>
-                             <view v-if="q.analysis" class="mb-1"><text class="tag orange">解析</text><LatexText :text="q.analysis"/></view>
-                             <view v-if="q.detailed"><text class="tag green">详解</text><LatexText :text="q.detailed"/></view>
+                            <view v-if="showAnswerMap[q.id]" class="answer-box mt-2">
+                                 <view v-if="q.answer" class="ans-block"><view class="ans-tag answer">答案</view><view class="ans-content" :style="dynamicFontStyle"><LatexText :text="q.answer"/></view></view>
+                                 <view v-if="q.analysis" class="ans-block"><view class="ans-tag analysis">解析</view><view class="ans-content" :style="dynamicFontStyle"><LatexText :text="q.analysis"/></view></view>
+                                 <view v-if="q.detailed" class="ans-block"><view class="ans-tag detailed">详解</view><view class="ans-content" :style="dynamicFontStyle"><LatexText :text="q.detailed"/></view></view>
+                            </view>
                         </view>
                     </view>
                 </view>
@@ -113,6 +118,7 @@
 <script setup>
 import { ref, computed } from 'vue';
 import LatexText from './LatexText.vue';
+import { globalConfig, formatOptionLabel, formatSubIndex } from '@/utils/configStore.js';
 
 const props = defineProps({
   isOpen: Boolean,
@@ -197,6 +203,13 @@ const handleClear = () => {
         }
     });
 };
+
+const dynamicFontStyle = computed(() => {
+  return {
+    fontSize: `${globalConfig.fontSize}px`,
+    lineHeight: globalConfig.lineHeight
+  };
+});
 </script>
 
 <style lang="scss" scoped>
@@ -244,31 +257,45 @@ const handleClear = () => {
     padding-left: 10px; border-left: 4px solid #2563eb; margin-bottom: 10px; 
 }
 
-.mini-card { background: white; border-radius: 6px; padding: 12px; margin-bottom: 10px;margin-right: 18px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
-.mc-top { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 8px; border-bottom: 1px dashed #f1f5f9; padding-bottom: 5px; }
+/* Question Card Styles - Standardized */
+.q-card { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin-bottom: 12px; margin-right: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+.q-header { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 10px; border-bottom: 1px dashed #f1f5f9; padding-bottom: 5px; }
 .mc-idx { font-weight: bold; color: #94a3b8; }
 .mc-del { color: #ef4444; cursor: pointer; }
-.mc-content { cursor: pointer; }
-.mc-text { font-size: 14px; line-height: 1.5; color: #1e293b; }
-.mc-img { margin: 5px 0; display: flex; }
-.mc-img.center { justify-content: center; }
-.mc-img image { max-width: 100%; border-radius: 4px; border: 1px solid #eee; }
-.mc-opts { display: grid; gap: 8px; margin-top: 8px; font-size: 14px; color: #334155; }
-.mc-opt-item { display: flex; align-items: center; }
-.mc-opt-item .b { font-weight: bold; margin-right: 4px; }
-.mc-ans-box { margin-top: 10px; padding: 10px; background: #f0f9ff; border-radius: 4px; font-size: 13px; color: #0c4a6e; }
-.mb-1 { margin-bottom: 5px; }
-.tag { display: inline-block; background: #2563eb; color: white; font-size: 10px; padding: 1px 4px; border-radius: 3px; margin-right: 5px; }
-.tag.orange { background: #f59e0b; }
-.tag.green { background: #10b981; }
+.q-body { cursor: pointer; color: #1e293b; }
+.q-title { margin-bottom: 8px; line-height: 1.6; }
 
-/* 新增：子题目样式 */
-.mc-sub-list { margin-top: 10px; border-top: 1px dashed #eee; padding-top: 8px; }
-.mc-sub-item { margin-bottom: 12px; }
-.mc-sub-text { font-size: 13px; color: #334155; display: flex; gap: 4px; }
-.sub-idx { font-weight: bold; flex-shrink: 0; }
-.mc-sub-ans { margin-top: 5px; font-size: 12px; background: #f1f5f9; padding: 4px 8px; border-radius: 4px; color: #64748b; }
-.mt-1 { margin-top: 4px; }
+.img-container { margin: 10px 0; display: flex; width: 100%; }
+.img-container.align-left { justify-content: flex-start; }
+.img-container.align-center { justify-content: center; }
+.img-container.align-right { justify-content: flex-end; }
+.q-image { max-width: 100%; border-radius: 4px; border: 1px solid #eee; }
+
+.opt-grid { display: grid; gap: 8px; margin-top: 8px; color: #334155; }
+.opt-item { display: flex; align-items: baseline; }
+.opt-key { font-weight: bold; margin-right: 5px; flex-shrink: 0; }
+.opt-val { flex: 1; word-break: break-all; }
+.opt-item :deep(.latex-text-container) { flex: 1; width: auto; }
+
+.sub-q-list-view { margin-top: 10px; border-top: 1px dashed #eee; padding-top: 8px; }
+.sub-q-row { margin-bottom: 12px; }
+.sub-q-txt { display: flex; align-items: baseline; gap: 4px; color: #334155; }
+.sub-idx { font-weight: bold; margin-right: 5px; flex-shrink: 0; }
+.sub-indent { margin-left: 22px; }
+.sub-q-ans-box { margin-top: 5px; background: #f1f5f9; padding: 4px 8px; border-radius: 4px; color: #64748b; }
+.ans-label { font-weight: bold; color: #2563eb; margin-right: 4px; }
+
+.mt-2 { margin-top: 8px; }
+
+/* Answer Box Styles */
+.answer-box { background: #f0f9ff; padding: 12px 15px; border-radius: 6px; border: 1px dashed #bae6fd; color: #0c4a6e; margin-top: 10px; }
+.ans-block { margin-bottom: 0.8em; display: flex; align-items: baseline; }
+.ans-block:last-child { margin-bottom: 0; }
+.ans-tag { display: inline-block; padding: 2px 8px; border-radius: 4px; color: white; font-size: 0.9em; font-weight: bold; margin-right: 8px; flex-shrink: 0; line-height: 1.2 !important; }
+.ans-tag.answer { background-color: #2563eb; } 
+.ans-tag.analysis { background-color: #f59e0b; } 
+.ans-tag.detailed { background-color: #10b981; } 
+.ans-content { color: #334155; flex: 1; }
 
 /* 底部 */
 .drawer-footer {

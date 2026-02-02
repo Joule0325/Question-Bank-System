@@ -75,11 +75,11 @@
             <view class="setting-group">
               <view class="input-line">
                 <text class="input-label">主标题</text>
-                <input class="custom-input" v-model="titles.main" placeholder="如: 2026模拟考" @input="debounceGenerate" />
+                <input class="custom-input" v-model="titles.main" placeholder="如: 2026届高三摸底考试" @input="debounceGenerate" />
               </view>
               <view class="input-line">
                 <text class="input-label">副标题</text>
-                <input class="custom-input" v-model="titles.sub" placeholder="如: 物理试题" @input="debounceGenerate" />
+                <input class="custom-input" v-model="titles.sub" placeholder="如: 数学试卷" @input="debounceGenerate" />
               </view>
             </view>
 
@@ -190,9 +190,9 @@ const pdfUrl = ref('');
 const compileError = ref('');
 
 // --- 设置状态 ---
-const titles = reactive({ main: '高中物理练习题', sub: '测试卷' });
+const titles = reactive({ main: '2026届圆创联盟&广州市8月调研考试', sub: '数学试卷' });
 const answerPos = ref('end');
-const selectedTplId = ref(1);
+const selectedTplId = ref(1); 
 
 const metadata = reactive({
   year: true,
@@ -215,7 +215,7 @@ const metadataOpts = [
 ];
 
 const templates = ref([
-  { id: 1, name: "标准试卷" },
+  { id: 1, name: "GEE仿真试卷(A4)" }, 
   { id: 2, name: "两栏紧凑" },
   { id: 3, name: "答题卡A3" },
   { id: 4, name: "作业练习" }
@@ -276,7 +276,7 @@ const processContent = (text, imgCallback) => {
        
        return p.replace(/([#%&_{}])/g, '\\$1')
                .replace(/\^/g, '\\textasciicircum ')
-               .replace(/~/g, '\\textasciitilde ');
+               .replace(/\~/g, '\\textasciitilde ');
    }).join('');
 
    // 4. 解析 HTML 样式 -> LaTeX 命令
@@ -323,28 +323,26 @@ const processContent = (text, imgCallback) => {
    return processed;
 };
 
-// 格式化选项
-const formatOptions = (options, layoutVal) => {
-    const layout = Number(layoutVal) || 4; 
-    const opts = [];
-    ['A', 'B', 'C', 'D'].forEach(k => {
-        if (options[k]) opts.push(`\\textbf{${k}.} ${processContent(options[k], (n, u) => imageAssets[n] = u)}`);
-    });
+// 格式化选项 (使用 tasks 宏包，增强版)
+const formatOptions = (options, layoutVal, indent = '') => {
+    if (!options) return '';
     
-    if (opts.length === 0) return '';
+    // 过滤掉值为空的选项
+    const validKeys = Object.keys(options)
+        .filter(k => options[k] && String(options[k]).trim() !== '') 
+        .sort();
+    
+    if (validKeys.length === 0) return '';
 
-    let cols = 'l'.repeat(layout); 
-    let latex = `\\par \\noindent \\begin{tabular}{@{\\hspace{1em}}${cols}}\n`;
+    const layout = Number(layoutVal) || 4; 
     
-    for (let i = 0; i < opts.length; i++) {
-        latex += opts[i];
-        if ((i + 1) % layout === 0 && i !== opts.length - 1) {
-            latex += ' \\\\ \n';
-        } else if (i !== opts.length - 1) {
-            latex += ' & ';
-        }
-    }
-    latex += `\n\\end{tabular}`;
+    // 增加缩进，使源码更整洁
+    let latex = `${indent}\\begin{tasks}(${layout})\n`;
+    validKeys.forEach(k => {
+        latex += `${indent}\t\\task ${processContent(options[k], (n, u) => imageAssets[n] = u)}\n`;
+    });
+    latex += `${indent}\\end{tasks}`;
+    
     return latex;
 };
 
@@ -352,96 +350,171 @@ const formatOptions = (options, layoutVal) => {
 const generateLatex = () => {
   imageAssets = {};
   
-  let docClassOpt = 'UTF8';
-  let geoOpt = 'a4paper,landscape,left=2cm,right=2cm,top=2cm,bottom=2cm';
-  
-  if (selectedTplId.value === 2) {
-      docClassOpt += ',twocolumn';
-      geoOpt = 'a4paper,left=1.5cm,right=1.5cm,top=2cm,bottom=2cm';
-  } else if (selectedTplId.value === 3) {
-      geoOpt = 'a3paper,landscape,twocolumn,left=2cm,right=2cm,top=2cm,bottom=2cm';
-  }
-
-  let content = `\\documentclass[${docClassOpt}]{ctexart}
-\\usepackage{geometry}
-\\geometry{${geoOpt}}
-\\usepackage{amsmath}
-\\usepackage{amssymb}
+  // 基础文档类设置
+  let content = `\\documentclass[11pt]{ctexart}
+\\usepackage{amsmath,amssymb,bm}
 \\usepackage{graphicx}
-\\usepackage{float}
-\\usepackage{tabularx}
-\\usepackage{xcolor}
+\\usepackage{geometry}
+\\usepackage{fancyhdr}
+\\usepackage{lastpage}
 \\usepackage{enumitem}
+\\usepackage{setspace}
+\\usepackage{tasks} % 关键：用于选项排版
+\\usepackage{txfonts} % Times New Roman 风格
 
+% ===== GEEexam.sty 核心定义内联 =====
+% 页面设置
+\\geometry{a4paper, portrait, hmargin={2cm, 2cm}, vmargin={1.5cm, 1.5cm}, footskip=0.75cm, headsep=0.25cm}
+
+% 页眉页脚
+\\pagestyle{fancy}
+\\fancyhf{}
+\\renewcommand{\\headrulewidth}{0pt}
+\\fancyfoot[C]{\\kaishu ${cleanTex(titles.sub)} \\quad 第 \\thepage 页 \\quad (共 \\pageref{LastPage} 页)}
+
+% 自定义命令
+\\newcommand{\\juemi}{\\textbf{绝密 $\\bigstar$ 启用前} \\par}
+\\newcommand{\\biaoti}[1]{\\begin{center}{\\heiti\\zihao{2} #1}\\end{center}}
+\\newcommand{\\fubiaoti}[1]{\\begin{center}{\\kaishu\\zihao{3} #1}\\end{center}}
+
+% tasks 设置 (仿 GEEexam.sty)
+\\settasks{
+    label=\\Alph*.,
+    label-offset={0.4em},
+    label-align=left,
+    column-sep={1em},
+    label-width=2ex,
+    item-indent={15pt},
+    before-skip={-0.7em},
+    after-skip={-0.7em}
+}
+
+% 全局设置
 \\setlength{\\parindent}{0pt}
-\\setlength{\\parskip}{0.5em}
-
-\\title{\\heiti \\zihao{2} ${cleanTex(titles.main)} \\\\ \\vspace{0.5em} \\kaishu \\zihao{3} ${cleanTex(titles.sub)}}
-\\author{}
-\\date{}
+\\setstretch{2.1}
+% ===================================
 
 \\begin{document}
-\\maketitle
-\\vspace{1em}
 
+\\zihao{5}
+\\juemi
+\\biaoti{${cleanTex(titles.main)}}
+\\fubiaoti{${cleanTex(titles.sub)}}
+
+{\\heiti 注意事项}:
+\\begin{enumerate}[itemsep=-0.3em,topsep=0pt]
+    \\item 答卷前,考生务必将自己的姓名和准考证号填写在答题卡上.
+    \\item 回答选择题时,选出每小题答案后,用铅笔把答题卡对应题目的答案标号涂黑.如需改动,用橡皮擦干净后,再选涂其它答案标号.回答非选择题时,将答案写在答题卡上.写在本试卷上无效.
+    \\item 考试结束后,将本试卷和答题卡一并交回.
+\\end{enumerate}
+
+\\vspace{1em}
 `;
 
+  // 分组逻辑
+  const groupMap = {
+      'choice': { name: '选择题', list: [] },
+      'multiple_choice': { name: '多选题', list: [] },
+      'fill': { name: '填空题', list: [] },
+      'subjective': { name: '解答题', list: [] },
+      'other': { name: '综合题', list: [] }
+  };
+
   if (props.questions && props.questions.length > 0) {
-    props.questions.forEach((q, index) => {
-      // 1. 属性
-      let prefixParts = [];
-      if (metadata.year && q.year) prefixParts.push(q.year);
-      if (metadata.province && q.province) prefixParts.push(q.province);
-      if (metadata.source && q.source) prefixParts.push(q.source);
-      let prefixStr = prefixParts.join('');
-      let diffStr = (metadata.difficulty && q.difficulty) ? `${q.difficulty}星` : '';
-      let finalAttr = '';
-      if (prefixStr && diffStr) finalAttr = `(${prefixStr} ${diffStr})`; 
-      else if (prefixStr || diffStr) finalAttr = `(${prefixStr}${diffStr})`;
-
-      // 2. 题干
-      const qTitle = processContent(q.title || '', (n, u) => imageAssets[n] = u);
-      content += `\\noindent\\textbf{${index + 1}.} ${finalAttr ? '\\small ' + finalAttr + ' \\normalsize ' : ''}${qTitle}\n\n`;
-
-      // 3. 选项
-      if (q.options && (q.options.A || q.options.B)) {
-          content += formatOptions(q.options, q.optionLayout) + '\n\n';
-      }
-
-      // 4. 小题
-      if (q.subQuestions && q.subQuestions.length > 0) {
-          q.subQuestions.forEach(sub => {
-              const subContent = processContent(sub.content || '', (n, u) => imageAssets[n] = u);
-              content += `\\par \\indent ${subContent}\n\n`;
-              if (sub.options && (sub.options.A || sub.options.B)) {
-                  content += formatOptions(sub.options, sub.optionLayout) + '\n\n';
-              }
-          });
-      }
-
-      // 5. 答案跟随
-      if (answerPos.value === 'question') {
-          let extras = buildAnswerBlock(q);
-          if (extras.length > 0) {
-               content += `\\par \\vspace{0.5em} \\noindent \\color{blue} ${extras.join('\\\\ ')} \\color{black} \n\n`;
-               content += `\\vspace{0.5cm}\\hrule\\vspace{0.5cm}\n`;
+      props.questions.forEach(q => {
+          let type = 'other';
+          if (q.type) {
+              if (q.type.includes('单选') || q.type === 'choice') type = 'choice';
+              else if (q.type.includes('多选')) type = 'multiple_choice';
+              else if (q.type.includes('填空')) type = 'fill';
+              else if (q.type.includes('解答') || q.type.includes('简答')) type = 'subjective';
           } else {
-               content += `\\vspace{1cm}\n`;
+             // 兜底推断
+             if (q.options && Object.keys(q.options).length > 0) type = 'choice';
+             else type = 'subjective';
           }
-      } else {
-          content += `\\vspace{1cm}\n`;
-      }
-    });
+          groupMap[type].list.push(q);
+      });
   }
 
-  // 6. 参考答案
+  // 生成题目列表计数器
+  let qCounter = 0;
+  
+  // 生成器函数
+  const generateSection = (title, qList) => {
+      if (qList.length === 0) return '';
+      // 使用缩进让源码好看
+      let secTex = `\\section*{${title}}\n\\begin{enumerate}[leftmargin=1.7em, start=${qCounter + 1}]\n`;
+      
+      qList.forEach((q) => {
+          qCounter++;
+          secTex += `\t\\item `;
+          
+          // 属性
+          let attrStr = '';
+          if (metadata.year || metadata.province || metadata.difficulty) {
+              let parts = [];
+              if (metadata.year && q.year) parts.push(q.year);
+              if (metadata.province && q.province) parts.push(q.province);
+              if (metadata.difficulty && q.difficulty) parts.push(q.difficulty + '星');
+              if (parts.length > 0) attrStr = `\\small (${parts.join(' ')}) \\normalsize `;
+          }
+          
+          const qTitle = processContent(q.title || '', (n, u) => imageAssets[n] = u);
+          secTex += `${attrStr}${qTitle}\n`;
+
+          // 选项 (大题) - 增加缩进
+          if (q.options) {
+              secTex += formatOptions(q.options, q.optionLayout, '\t') + '\n';
+          }
+
+          // 小题 (使用 enumerate + tasks)
+          if (q.subQuestions && q.subQuestions.length > 0) {
+              secTex += `\t\\begin{enumerate}[label=(\\arabic*)]\n`; // 增加子题号 (1)(2)
+              q.subQuestions.forEach(sub => {
+                  const subContent = processContent(sub.content || '', (n, u) => imageAssets[n] = u);
+                  secTex += `\t\t\\item ${subContent}\n`;
+                  
+                  // 关键修复：只要有options，就调用 formatOptions 生成 tasks
+                  if (sub.options) {
+                      secTex += formatOptions(sub.options, sub.optionLayout, '\t\t') + '\n';
+                  }
+              });
+              secTex += `\t\\end{enumerate}\n`;
+          }
+
+          // 答案位置：每题之后
+          if (answerPos.value === 'question') {
+             let extras = buildAnswerBlock(q);
+             if (extras.length > 0) {
+                 secTex += `\t\\par {\\color{blue} ${extras.join(' \\\\ ')} }\n`;
+             }
+             secTex += `\t\\vspace{1em}\n\n`;
+          } else {
+             secTex += `\t\\vspace{1em}\n\n`;
+          }
+      });
+      secTex += `\\end{enumerate}\n\n`;
+      return secTex;
+  };
+
+  content += generateSection('一、选择题', groupMap.choice.list);
+  content += generateSection('二、多选题', groupMap.multiple_choice.list);
+  content += generateSection('三、填空题', groupMap.fill.list);
+  content += generateSection('四、解答题', groupMap.subjective.list);
+  content += generateSection('五、其他试题', groupMap.other.list);
+
+  // 答案位置：文末
   if (answerPos.value === 'end' && props.questions.length > 0) {
       if (contentSettings.answer || contentSettings.analysis || contentSettings.detailed) {
           content += `\\newpage\n\\section*{参考答案}\n`;
-          props.questions.forEach((q, index) => {
+          let allQs = [];
+          Object.values(groupMap).forEach(g => allQs = allQs.concat(g.list));
+          
+          allQs.forEach((q, idx) => {
               let extras = buildAnswerBlock(q);
               if (extras.length > 0) {
-                  content += `\\paragraph{第 ${index + 1} 题}\n`;
+                  content += `\\paragraph{第 ${idx + 1} 题}\n`;
                   content += `${extras.join('\\par ')}\n`;
               }
           });
@@ -582,7 +655,7 @@ watch(answerPos, generateLatex);
   gap: 10px;
 }
 
-/* 按钮样式 (仿照 ManageContentModal) */
+/* 按钮样式 */
 .h-btn {
   padding: 3px 12px;
   border-radius: 6px;
@@ -646,24 +719,20 @@ watch(answerPos, generateLatex);
   }
 }
 
-/* --- 修改位置：frontend/components/ExportQuestionsModal.vue 的 <style> --- */
-
 .col-settings {
   width: 330px;
   background: #FFFFFF;
   border-left: 1px solid #E5E7EB;
-  /* 确保它是 Flex 列布局，且限制溢出 */
   display: flex;
   flex-direction: column;
   overflow: hidden;
   
-  /* 核心修改：让滚动区域正确填充剩余空间并触发滚动 */
   .settings-scroll { 
     flex: 1; 
-    height: 0; /* 关键：强制高度由 flex 决定，而不是内容撑开 */
+    height: 0;
     padding: 20px 0px 20px 20px; 
     box-sizing: border-box; 
-    overflow-y: auto; /* 确保出现滚动条 */
+    overflow-y: auto;
   }
   
   .setting-group { margin-bottom: 24px; margin-right: 20px;}
@@ -672,7 +741,6 @@ watch(answerPos, generateLatex);
     font-size: 13px; font-weight: bold; color: #1e293b; margin-bottom: 10px; display: block; 
   }
 
-  /* 标题输入行样式 */
   .input-line {
     display: flex;
     align-items: center;
@@ -704,12 +772,10 @@ watch(answerPos, generateLatex);
     }
   }
   
-  /* 复选框/单选框列表 */
   .checkbox-list, .radio-list { 
     display: flex; 
     gap: 12px;
     
-    /* 横向排列 */
     &.horizontal {
       flex-direction: row;
       flex-wrap: wrap;
@@ -739,10 +805,9 @@ watch(answerPos, generateLatex);
     .cb-label, .radio-label { font-size: 13px; color: #475569; }
   }
 
-  /* 模板网格 */
   .template-grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 10px;
     
     .tpl-card {
@@ -770,7 +835,10 @@ watch(answerPos, generateLatex);
         .thumb-lines .tl { height: 2px; background: #CBD5E1; width: 100%; margin-bottom: 3px; border-radius: 2px; }
         .thumb-lines .tl.short { width: 60%; }
       }
-      .tpl-name { font-size: 12px; color: #475569; text-align: center; white-space: nowrap; transform: scale(0.95); }
+      .tpl-name { 
+          font-size: 12px; color: #475569; text-align: center; white-space: nowrap; transform: scale(0.95); 
+          width: 100%; overflow: hidden; text-overflow: ellipsis;
+      }
     }
   }
 }

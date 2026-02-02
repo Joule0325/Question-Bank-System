@@ -82,7 +82,7 @@
             </view>
 
             <view class="q-body">
-              <view class="content-wrapper">
+              <view class="content-wrapper" :style="dynamicFontStyle">
                 <view class="body-row" :class="{'material-box': item.subQuestions && item.subQuestions.length > 0}">
                     <view class="q-title"><LatexText :text="item.title"></LatexText></view>
                 </view>
@@ -94,12 +94,15 @@
                         class="sub-q-item"
                         :class="{ 'highlight-red': isSubQActive(subQ) }" 
                     >
-                        <view class="sub-q-content"><LatexText :text="subQ.content"></LatexText></view>
+                        <view class="sub-q-content" style="display: flex; align-items: baseline;">
+                            <text style="font-weight:bold; margin-right:5px; flex-shrink: 0;">{{ formatSubIndex(sIdx + 1) }}</text>
+                            <view style="flex:1;"><LatexText :text="subQ.content"></LatexText></view>
+                        </view>
                         
-                        <view v-if="subQ.optionRows && subQ.optionRows.length > 0" class="opt-container mt-2">
+                        <view v-if="subQ.optionRows && subQ.optionRows.length > 0" class="opt-container mt-2 sub-indent">
                           <view v-for="(row, rIdx) in subQ.optionRows" :key="rIdx" class="opt-row">
-                            <view v-for="opt in row" :key="opt.key" class="opt-item">
-                              <text class="opt-key">{{ opt.key }}.</text>
+                            <view v-for="opt in row" :key="opt.key" class="opt-item" :style="{ marginTop: globalConfig.optionMargin + 'px' }">
+                              <text class="opt-key">{{ formatOptionLabel(opt.key) }}</text>
                               <view class="opt-val"><LatexText :text="opt.value"></LatexText></view>
                             </view>
                           </view>
@@ -118,8 +121,8 @@
 
                 <view v-else-if="item.optionRows && item.optionRows.length > 0" class="opt-container">
                   <view v-for="(row, rIdx) in item.optionRows" :key="rIdx" class="opt-row">
-                    <view v-for="opt in row" :key="opt.key" class="opt-item">
-                      <text class="opt-key">{{ opt.key }}.</text>
+                    <view v-for="opt in row" :key="opt.key" class="opt-item" :style="{ marginTop: globalConfig.optionMargin + 'px' }">
+                      <text class="opt-key">{{ formatOptionLabel(opt.key) }}</text>
                       <view class="opt-val"><LatexText :text="opt.value"></LatexText></view>
                     </view>
                   </view>
@@ -128,15 +131,15 @@
                 <view class="answer-box mt-2" v-if="item.showAnswer">
                   <view class="ans-block" v-if="item.answer">
                     <view class="ans-tag answer">答案</view>
-                    <view class="ans-content"><LatexText :text="item.answer"></LatexText></view>
+                    <view class="ans-content" :style="dynamicFontStyle"><LatexText :text="item.answer"></LatexText></view>
                   </view>
                   <view class="ans-block" v-if="item.analysis">
                     <view class="ans-tag analysis">分析</view>
-                    <view class="ans-content"><LatexText :text="item.analysis"></LatexText></view>
+                    <view class="ans-content" :style="dynamicFontStyle"><LatexText :text="item.analysis"></LatexText></view>
                   </view>
                   <view class="ans-block" v-if="item.detailed">
                     <view class="ans-tag detailed">详解</view>
-                    <view class="ans-content"><LatexText :text="item.detailed"></LatexText></view>
+                    <view class="ans-content" :style="dynamicFontStyle"><LatexText :text="item.detailed"></LatexText></view>
                   </view>
                 </view>
 
@@ -266,11 +269,12 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onUnmounted, nextTick, watch } from 'vue';
+import { ref, reactive, onMounted, onUnmounted, nextTick, watch, computed } from 'vue';
 import CommonModal from '@/components/CommonModal.vue';
 import LatexText from '@/components/LatexText.vue';
 import { saveQuestion, updateQuestion } from '@/api/question.js';
 import { baseUrl } from '@/utils/request.js';
+import { globalConfig, formatOptionLabel, formatSubIndex } from '@/utils/configStore.js';
 
 const props = defineProps({
   visible: Boolean,
@@ -1263,6 +1267,13 @@ const copyOCRResult = () => {
     });
 };
 
+const dynamicFontStyle = computed(() => {
+  return {
+    fontSize: `${globalConfig.fontSize}px`,
+    lineHeight: globalConfig.lineHeight
+  };
+});
+
 defineExpose({ open });
 </script>
 
@@ -1305,16 +1316,17 @@ defineExpose({ open });
 .info-chip.year { background: #eef2ff; color: #4338ca; }
 .info-chip.num { font-family: monospace; }
 .seq-num { font-weight: bold; color: #cbd5e1; }
-.q-title { display: block; width: 100%; font-size: 15px; line-height: 1.6; color: #1e293b; }
+.q-title { display: block; width: 100%; line-height: 1.6; color: #1e293b; }
 .body-row { display: flex; margin-bottom: 10px; }
 .material-box { border-bottom: 1px dashed #e2e8f0; padding-bottom: 10px; margin-bottom: 15px; }
 .sub-q-item { margin-bottom: 20px; padding: 8px; border-radius: 6px; transition: background 0.3s; }
 .sub-q-item.highlight-red { background-color: #fef2f2; }
 .sub-q-item.highlight-red .sub-q-content :deep(.latex-text-container) { color: #ef4444 !important; font-weight: bold; }
+.sub-indent { margin-left: 22px; }
 .sub-q-tags { margin-top: 8px; display: flex; gap: 10px; }
 .mini-tag { font-size: 10px; background: #f1f5f9; color: #64748b; padding: 2px 8px; border-radius: 10px; cursor: pointer; }
 .mini-tag:hover { background: #e2e8f0; color: #334155; }
-.sub-q-ans-box { margin-top: 8px; padding: 8px; background: #f8fafc; border-radius: 4px; font-size: 13px; color: #334155; }
+.sub-q-ans-box { margin-top: 8px; padding: 8px; background: #f8fafc; border-radius: 4px; color: #334155; }
 .ans-label { font-weight: bold; color: #2563eb; margin-right: 4px; }
 .mb-1 { margin-bottom: 4px; }
 .mt-2 { margin-top: 8px; }
@@ -1332,18 +1344,18 @@ defineExpose({ open });
 .upload-text { font-size: 11px; color: #64748b; }
 .opt-container { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; color: #334155; }
 .opt-row { display: flex; gap: 10px; width: 100%; }
-.opt-item { flex: 1; display: flex; align-items: center; font-size: 14px; } 
+.opt-item { flex: 1; display: flex; align-items: baseline; } 
 .opt-key { font-weight: bold; margin-right: 8px; flex-shrink: 0; line-height: 1.6; } 
 .opt-val { flex: 1; word-break: break-all; }
 .opt-item :deep(.latex-text-container) { display: inline-block; width: auto; vertical-align: middle; }
-.answer-box { background: #f0f9ff; padding: 12px 15px; border-radius: 6px; border: 1px dashed #bae6fd; font-size: 14px; color: #0c4a6e; }
-.ans-block { margin-bottom: 12px; }
+.answer-box { background: #f0f9ff; padding: 12px 15px; border-radius: 6px; border: 1px dashed #bae6fd; color: #0c4a6e; }
+.ans-block { margin-bottom: 0.8em; display: flex; align-items: baseline; }
 .ans-block:last-child { margin-bottom: 0; }
-.ans-tag { display: inline-block; padding: 2px 8px; border-radius: 4px; color: white; font-size: 12px; font-weight: bold; margin-bottom: 4px; }
+.ans-tag { display: inline-block; padding: 2px 8px; border-radius: 4px; color: white; font-size: 0.9em; font-weight: bold; margin-right: 8px; flex-shrink: 0; line-height: 1.2 !important; }
 .ans-tag.answer { background-color: #2563eb; } 
 .ans-tag.analysis { background-color: #f59e0b; } 
 .ans-tag.detailed { background-color: #10b981; } 
-.ans-content { font-size: 14px; line-height: 1.6; color: #334155; }
+.ans-content { color: #334155; flex: 1; }
 .q-footer { border-top: 1px solid #f1f5f9; margin-top: 20px; padding-top: 16px; display: flex; justify-content: space-between; align-items: center; }
 .toggle-ans-btn { font-size: 12px; color: #64748b; cursor: pointer; padding: 4px 8px; border-radius: 4px; background: #f1f5f9; display: flex; align-items: center; gap: 4px; transition: all 0.2s; }
 .toggle-ans-btn:hover { background: #e2e8f0; color: #333; }

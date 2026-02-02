@@ -5,14 +5,6 @@
         <text class="logo-txt" :class="{ 'mini': isSidebarCollapsed }">{{ isSidebarCollapsed ? 'S' : 'Source' }}</text>
       </view>
       
-      <view class="space-switcher" v-if="!isSidebarCollapsed">
-         <view class="space-btn" :class="{active: currentMode==='private'}" @click="switchMode('private')">私人</view>
-         <view class="space-btn" :class="{active: currentMode==='public'}" @click="switchMode('public')">公共</view>
-      </view>
-      <view class="space-switcher-mini" v-else>
-         <text class="space-char">{{ currentMode==='private' ? '私' : '公' }}</text>
-      </view>
-      
       <view class="nav-items">
         <view class="nav-item" :class="{active: activeTab==='question_bank'}" @click="activeTab='question_bank'">
           <image src="/static/icons/题库.svg" class="nav-icon-img" mode="aspectFit"></image>
@@ -26,6 +18,11 @@
           <image src="/static/icons/资源.svg" class="nav-icon-img" mode="aspectFit"></image>
           <text class="nav-txt">资源</text>
         </view>
+        
+        <view class="nav-item" :class="{active: activeTab==='my'}" @click="activeTab='my'" style="margin-top: auto;">
+          <image src="/static/icons/我的.svg" class="nav-icon-img" mode="aspectFit"></image>
+          <text class="nav-txt">我的</text>
+        </view>
       </view>
 
       <view class="collapse-btn" @click="isSidebarCollapsed = !isSidebarCollapsed">
@@ -36,13 +33,30 @@
     <view class="main-workspace" v-if="activeTab === 'question_bank'">
       <view class="top-header">
               <view class="header-left-filters">
+                <view class="mode-wrapper" @click.stop="modeDropdownOpen = !modeDropdownOpen">
+                  <view class="mini-input mode-display">
+                    <text class="mode-text">{{ currentModeLabel }}</text>
+                    <image src="/static/icons/三角.svg" class="mode-arrow" mode="aspectFit" />
+                  </view>
+                  <view class="custom-mode-dropdown" v-if="modeDropdownOpen">
+                    <view 
+                      class="mode-item" 
+                      v-for="opt in modeOptions" 
+                      :key="opt.value"
+                      :class="{ active: currentMode === opt.value }"
+                      @click.stop="selectMode(opt.value)"
+                    >
+                      {{ opt.label }}
+                    </view>
+                  </view>
+                </view>
+
                 <input class="mini-input" v-model="filterYear" placeholder="年份" @input="debounceLoadQuestions" />
                 <input class="mini-input small" v-model="filterQNumber" placeholder="题号" @input="debounceLoadQuestions" />
                 <input class="mini-input medium" v-model="filterSource" placeholder="来源关键词..." @input="debounceLoadQuestions" />
               </view>
       
               <view class="header-right">
-                
                 <view class="total-count-box">
                   <text>共</text>
                   <text class="tc-num">{{ questions.length }}</text>
@@ -51,72 +65,37 @@
                 
                 <view class="page-size-wrap">
                   <text class="ps-label">每页</text>
-                  <picker :range="[10, 20, 50]" @change="handlePageSizeChange">
+                  <view class="page-size-wrapper" @click.stop="pageSizeDropdownOpen = !pageSizeDropdownOpen">
                     <view class="ps-box">
                       <text class="ps-text">{{ itemsPerPage }}</text>
                       <image src="/static/icons/三角.svg" class="ps-icon" mode="aspectFit" />
                     </view>
-                  </picker>
+                    <view class="custom-ps-dropdown" v-if="pageSizeDropdownOpen">
+                      <view class="ps-item" v-for="size in [10, 20, 50]" :key="size" :class="{ active: itemsPerPage === size }" @click.stop="selectPageSize(size)">{{ size }}</view>
+                    </view>
+                  </view>
                   <text class="ps-label">题</text>
                 </view>
 
                 <view class="pagination-bar">
-                  <image 
-                    src="/static/icons/左-圆.svg" 
-                    class="pg-circle-btn" 
-                    :class="{ disabled: currentPage === 1 }"
-                    @click="changePage(-1)" 
-                    mode="aspectFit"
-                  />
-
+                  <image src="/static/icons/左-圆.svg" class="pg-circle-btn" :class="{ disabled: currentPage === 1 }" @click="changePage(-1)" mode="aspectFit" />
                   <view class="pg-numbers">
-                    <view 
-                      v-for="(item, index) in visiblePages" 
-                      :key="item.key" 
-                      class="pg-num-circle" 
-                      :class="{ active: item.isActive }"
-                      @click="goToPage(item.val)"
-                    >
-                      {{ item.val }}
-                    </view>
+                    <view v-for="(item, index) in visiblePages" :key="item.key" class="pg-num-circle" :class="{ active: item.isActive }" @click="goToPage(item.val)">{{ item.val }}</view>
                   </view>
-
                   <view class="pg-more-wrap" v-if="totalPages > 5">
-                    <image 
-                      src="/static/icons/更多.svg" 
-                      class="pg-more-icon" 
-                      @click.stop="toggleJumpPopover"
-                      mode="aspectFit"
-                    />
+                    <image src="/static/icons/更多.svg" class="pg-more-icon" @click.stop="toggleJumpPopover" mode="aspectFit" />
                     <view class="jump-popover" v-if="showJumpPopover" @click.stop>
-                      <input 
-                        class="jump-input" 
-                        v-model="jumpPageInput" 
-                        type="number" 
-                        :focus="showJumpPopover" 
-                        @confirm="handleJumpConfirm" 
-                      />
+                      <input class="jump-input" v-model="jumpPageInput" type="number" :focus="showJumpPopover" @confirm="handleJumpConfirm" />
                       <view class="jump-go-btn" @click="handleJumpConfirm">Go</view>
                     </view>
                   </view>
-
-                  <view class="pg-total-text" v-if="totalPages > 5">
-                    共 {{ totalPages }} 页
-                  </view>
-
-                  <image 
-                    src="/static/icons/右-圆.svg" 
-                    class="pg-circle-btn" 
-                    :class="{ disabled: currentPage >= totalPages }"
-                    @click="changePage(1)" 
-                    mode="aspectFit"
-                  />
+                  <view class="pg-total-text" v-if="totalPages > 5">共 {{ totalPages }} 页</view>
+                  <image src="/static/icons/右-圆.svg" class="pg-circle-btn" :class="{ disabled: currentPage >= totalPages }" @click="changePage(1)" mode="aspectFit" />
                 </view>
-                </view>
+              </view>
       </view>
 
       <view class="workspace-body">
-        
         <view class="resource-sidebar-wrapper">
           <view class="resource-sidebar">
             <view class="res-header">
@@ -131,9 +110,7 @@
               </view>
               <view class="setting-wrapper" v-if="canEdit" @mouseenter="manageMenuOpen = true" @mouseleave="manageMenuOpen = false">
                 <view class="setting-btn custom-menu-icon">
-                  <view class="menu-line"></view>
-                  <view class="menu-line"></view>
-                  <view class="menu-line"></view>
+                  <view class="menu-line"></view><view class="menu-line"></view><view class="menu-line"></view>
                 </view>
                 <view class="popover-menu" v-if="manageMenuOpen">
                   <view class="menu-item header">目录管理</view>
@@ -158,14 +135,9 @@
 
             <view class="tree-scroll">
               <CategoryTree 
-                v-for="cat in categories" 
-                :key="cat.id" 
-                :node="cat" 
-                :level="0"
-                :selectedIds="selectedCategoryIds"
-                :defaultOpen="defaultTreeOpen"
-                :expandedIds="treeExpandedIds"
-                @select="handleTreeSelect"
+                v-for="cat in categories" :key="cat.id" :node="cat" :level="0"
+                :selectedIds="selectedCategoryIds" :defaultOpen="defaultTreeOpen"
+                :expandedIds="treeExpandedIds" @select="handleTreeSelect"
               ></CategoryTree>
             </view>
           </view>
@@ -173,21 +145,13 @@
 
         <view class="content-canvas">
           <view class="filter-bar">
-            
             <view class="filter-header" @click="isFilterExpanded = !isFilterExpanded">
               <view class="fh-left-group">
-                <text class="fh-title">筛选条件 <text v-if="currentMode==='public'" style="font-weight:normal;color:#94a3b8;margin-left:5px;">(公共库)</text></text>
-                
-                <view class="clear-filter-btn" 
-                      v-if="allActiveFilters.length > 0" 
-                      @click.stop="clearAllFilters">
-                  清空标签筛选
-                </view>
+                <text class="fh-title">筛选条件 <text v-if="currentMode==='public'" style="font-weight:normal;color:#94a3b8;margin-left:5px;">(官方库)</text></text>
+                <view class="clear-filter-btn" v-if="allActiveFilters.length > 0" @click.stop="clearAllFilters">清空标签筛选</view>
               </view>
-            
               <text class="fh-icon">{{ isFilterExpanded ? '▲ 收起' : '▼ 展开' }}</text>
             </view>
-          
             <view class="filter-body" :class="{ collapsed: !isFilterExpanded }">
               <view class="f-row">
                 <text class="f-label">题型:</text>
@@ -196,7 +160,6 @@
                   <text class="tag" v-for="t in typeOptions" :key="t" :class="{active: selectedType===t}" @click="selectedType=t">{{ t }}</text>
                 </view>
               </view>
-              
               <view class="f-row mt-2">
                 <text class="f-label">难度:</text>
                 <view class="f-tags">
@@ -204,7 +167,6 @@
                   <text class="tag" v-for="d in [1,2,3,4,5]" :key="d" :class="{active: selectedDiff===d}" @click="selectedDiff=d">{{ '★'.repeat(d) }}</text>
                 </view>
               </view>
-              
               <view class="f-row mt-2 align-start">
                 <text class="f-label">地区:</text>
                 <view class="province-grid">
@@ -212,19 +174,14 @@
                   <text class="tag" v-for="p in provinceOptions" :key="p" :class="{active: selectedProvince===p}" @click="selectedProvince=p">{{ p }}</text>
                 </view>
               </view>
-          
               <view class="f-row mt-2 active-filters-row" v-if="allActiveFilters.length > 0">
                 <text class="f-label">筛选:</text>
                 <view class="f-tags">
-                  <view v-for="item in allActiveFilters" :key="item.type + item.id" 
-                        class="tag-chip" 
-                        :class="item.type === 'cat' ? 'red' : 'blue'">
-                      <text>{{ item.name }}</text>
-                      <text class="x-btn" @click.stop="removeFilter(item)">✕</text>
+                  <view v-for="item in allActiveFilters" :key="item.type + item.id" class="tag-chip" :class="item.type === 'cat' ? 'red' : 'blue'">
+                      <text>{{ item.name }}</text><text class="x-btn" @click.stop="removeFilter(item)">✕</text>
                   </view>
-                  </view>
+                </view>
               </view>
-          
             </view> 
           </view>
 
@@ -242,7 +199,6 @@
                   <text class="info-chip type">{{ q.type }}</text>
                   <text class="info-chip prov" v-if="q.province">{{ q.province }}</text>
                 </view>
-                
                 <view class="meta-right">
                   <template v-if="currentMode === 'public'">
                       <block v-if="currentUser && currentUser.role === 'admin'">
@@ -252,7 +208,6 @@
                       </block>
                       <text v-else class="op-btn green" @click="openForkModal(q)">+ 加入我的题库</text>
                   </template>
-                  
                   <template v-else>
                       <text class="op-btn blue" @click="openEditModal(q)">编辑</text>
                       <text class="op-btn red" @click="handleDelete(q.id)">删除</text>
@@ -261,86 +216,55 @@
               </view>
 
               <view class="q-body" :class="{ 'layout-side-right': q.imgPosCode === 'r' }" @click="toggleAnswer(q.id)">
-                <view class="content-wrapper">
+                <view class="content-wrapper" :style="dynamicFontStyle">
                     <view v-if="q.image && q.imgPosCode.startsWith('u')" class="img-container" :class="'align-'+q.imgAlign">
                        <image :src="q.image" class="q-image" mode="widthFix" />
                     </view>
-
                     <view class="body-row" :class="{'material-box': q.subQuestions && q.subQuestions.length > 0}">
                       <view class="q-title"><LatexText :text="q.title"></LatexText></view>
                     </view>
-
                     <view v-if="q.image && q.imgPosCode.startsWith('m')" class="img-container" :class="'align-'+q.imgAlign">
                        <image :src="q.image" class="q-image" mode="widthFix" />
                     </view>
-
                     <view v-if="q.subQuestions && q.subQuestions.length > 0" class="sub-q-list-view">
-                        <view 
-                            v-for="(subQ, sIdx) in q.subQuestions" 
-                            :key="sIdx" 
-                            class="sub-q-row"
-                            :class="{ 'highlight-active': isSubQHighlighted(subQ) }"
-                        >
-                            <view class="sub-q-txt"><LatexText :text="subQ.content"></LatexText></view>
-                            
-                            <view v-if="subQ.options && Object.keys(subQ.options).length > 0" class="opt-grid mt-2" :style="'grid-template-columns: repeat(' + (subQ.optionLayout||4) + ', 1fr)'">
-                                 <view v-for="(val, key) in subQ.options" :key="key" class="opt-item">
-                                    <text class="opt-key">{{ key }}.</text>
-                                    <LatexText :text="val"></LatexText>
+                        <view v-for="(subQ, sIdx) in q.subQuestions" :key="sIdx" class="sub-q-row" :class="{ 'highlight-active': isSubQHighlighted(subQ) }">
+                            <view class="sub-q-txt" style="display: flex; align-items: baseline;"><text style="font-weight:bold; margin-right:5px; flex-shrink: 0;">{{ formatSubIndex(sIdx + 1) }}</text><view style="flex:1;"><LatexText :text="subQ.content"></LatexText></view></view>
+                            <view v-if="subQ.options && Object.keys(subQ.options).length > 0" class="opt-grid mt-2 sub-indent" :style="'grid-template-columns: repeat(' + (subQ.optionLayout||4) + ', 1fr)'">
+                                 <view v-for="(val, key) in subQ.options" :key="key" class="opt-item" :style="{ marginTop: globalConfig.optionMargin + 'px' }">
+                                    <text class="opt-key">{{ formatOptionLabel(key) }}</text><LatexText :text="val"></LatexText>
                                  </view>
                             </view>
-                            
                             <view class="sub-q-tags" v-if="subQ.tags && subQ.tags.length">
                                 <text v-for="t in subQ.tags" :key="t" class="mini-tag">{{t}}</text>
                             </view>
                         </view>
                     </view>
-                    
                     <view v-else-if="q.options && (q.type && (q.type.includes('单选') || q.type.includes('多选') || q.type.includes('选择')))" class="opt-grid" :style="'grid-template-columns: repeat(' + (q.optionLayout||4) + ', 1fr)'">
-                      <view v-for="(val, key) in q.options" :key="key" class="opt-item"><text class="opt-key">{{ key }}.</text><LatexText :text="val"></LatexText></view>
+                      <view v-for="(val, key) in q.options" :key="key" class="opt-item" :style="{ marginTop: globalConfig.optionMargin + 'px' }"><text class="opt-key">{{ formatOptionLabel(key) }}</text><LatexText :text="val"></LatexText></view>
                     </view>
-
                     <view v-if="q.image && q.imgPosCode.startsWith('b')" class="img-container" :class="'align-'+q.imgAlign">
                        <image :src="q.image" class="q-image" mode="widthFix" />
                     </view>
-
                     <view v-if="showAnswerMap[q.id]" class="answer-box mt-2">
-                        <view class="ans-block" v-if="q.answer">
-                            <view class="ans-tag answer">答案</view>
-                            <view class="ans-content"><LatexText :text="q.answer"></LatexText></view>
-                        </view>
-                        <view class="ans-block" v-if="q.analysis">
-                            <view class="ans-tag analysis">分析</view>
-                            <view class="ans-content"><LatexText :text="q.analysis"></LatexText></view>
-                        </view>
-                        <view class="ans-block" v-if="q.detailed">
-                            <view class="ans-tag detailed">详解</view>
-                            <view class="ans-content"><LatexText :text="q.detailed"></LatexText></view>
-                        </view>
+                        <view class="ans-block" v-if="q.answer"><view class="ans-tag answer">答案</view><view class="ans-content" :style="dynamicFontStyle"><LatexText :text="q.answer"></LatexText></view></view>
+                        <view class="ans-block" v-if="q.analysis"><view class="ans-tag analysis">分析</view><view class="ans-content" :style="dynamicFontStyle"><LatexText :text="q.analysis"></LatexText></view></view>
+                        <view class="ans-block" v-if="q.detailed"><view class="ans-tag detailed">详解</view><view class="ans-content" :style="dynamicFontStyle"><LatexText :text="q.detailed"></LatexText></view></view>
                     </view>
                 </view>
-                <view v-if="q.image && q.imgPosCode === 'r'" class="side-img-container">
-                   <image :src="q.image" class="q-image" mode="widthFix" />
-                </view>
+                <view v-if="q.image && q.imgPosCode === 'r'" class="side-img-container"><image :src="q.image" class="q-image" mode="widthFix" /></view>
               </view>
-
               <view class="q-footer">
                 <view class="tags-row">
                   <view v-for="tag in getKnowledgeTags(q.categoryIds)" :key="'k-'+(tag.id || tag.title)" class="tag-badge red" @click.stop="handleTagClick(tag.title || tag)">
-                    <image src="/static/icons/标签-红.svg" class="tag-icon icon-red" mode="aspectFit"></image>
-                    <text>{{ tag.title || tag }}</text>
+                    <image src="/static/icons/标签-红.svg" class="tag-icon icon-red" mode="aspectFit"></image><text>{{ tag.title || tag }}</text>
                   </view>
-                  
                   <view v-for="tag in (q.tags||[])" :key="'t-'+tag" class="tag-badge blue" @click.stop="handleTagClick(tag)">
-                    <image src="/static/icons/标签-蓝.svg" class="tag-icon icon-blue" mode="aspectFit"></image>
-                    <text>{{ tag }}</text>
+                    <image src="/static/icons/标签-蓝.svg" class="tag-icon icon-blue" mode="aspectFit"></image><text>{{ tag }}</text>
                   </view>
                 </view>
                 <view class="footer-right">
                     <text class="hash-code">#{{ q.code }}</text>
-                    <view class="basket-add-btn-rect" :class="{waiting: waitingBasketKey===q.id}" @click.stop="toggleWaiting(q.id)">
-                        {{ waitingBasketKey===q.id ? '选择篮子...' : '加入试题篮' }}
-                    </view>
+                    <view class="basket-add-btn-rect" :class="{waiting: waitingBasketKey===q.id}" @click.stop="toggleWaiting(q.id)">{{ waitingBasketKey===q.id ? '选择篮子...' : '加入试题篮' }}</view>
                 </view>
               </view>
             </view>
@@ -350,23 +274,14 @@
 
         <view class="right-toolbar">
           <text class="tool-head">工具</text>
-          <view v-if="canEdit" class="tool-btn primary" @click="openAddModal">
-              <image src="/static/icons/添加.svg" class="tool-icon-img" mode="aspectFit"></image>
-              <text class="t-lbl">录题</text>
-          </view>
-          <view v-else class="tool-btn disabled">
-              <image src="/static/icons/添加.svg" class="tool-icon-img" mode="aspectFit" style="filter:grayscale(1)"></image>
-              <text class="t-lbl" style="color:#94a3b8">只读</text>
-          </view>
+          <view v-if="canEdit" class="tool-btn primary" @click="openAddModal"><image src="/static/icons/添加.svg" class="tool-icon-img" mode="aspectFit"></image><text class="t-lbl">录题</text></view>
+          <view v-else class="tool-btn disabled"><image src="/static/icons/添加.svg" class="tool-icon-img" mode="aspectFit" style="filter:grayscale(1)"></image><text class="t-lbl" style="color:#94a3b8">只读</text></view>
           <view class="divider"></view>
           <text class="tool-head">试题篮</text>
           <view class="basket-col">
-            <view v-for="n in 7" :key="n" class="basket-circle" @click="activeBasketId=n">
-              {{ n }}<view v-if="baskets[n].length" class="badge">{{ baskets[n].length }}</view>
-            </view>
+            <view v-for="n in 7" :key="n" class="basket-circle" @click="activeBasketId=n">{{ n }}<view v-if="baskets[n].length" class="badge">{{ baskets[n].length }}</view></view>
           </view>
         </view>
-
       </view>
     </view>
 
@@ -376,64 +291,29 @@
         </view>
     </view>
 
+    <view class="main-workspace" v-else-if="activeTab === 'my'">
+        <view class="my-wrapper" style="padding: 15px; height: 100%; box-sizing: border-box; background-color: #f8fafc;">
+            <PersonalCenter />
+        </view>
+    </view>
+
     <view class="main-workspace empty-state" v-else>
       <view class="empty-content"><text class="empty-icon">🚧</text><text class="empty-text">功能开发中...</text></view>
     </view>
 
     <ManageSubjectModal v-model:visible="showSubjectModal" :initialData="subjects" :mode="currentMode" @saved="reloadSubjects" />
     <ManageContentModal v-model:visible="showContentModal" :subjectId="currentSubjectId" :mode="currentMode" @saved="loadCategories" />
-    <AddQuestionModal 
-        ref="addModalRef" 
-        v-model:visible="showAddModal" 
-        :subjectId="currentSubjectId" 
-        :knowledgeList="flatLeaves" 
-        :isPublic="currentMode === 'public'"
-        @saved="handleQuestionSaved" 
-    />
-    
-    <ExportQuestionsModal 
-        v-model:visible="showExportModal" 
-        :questions="questionsForExport"
-    />
-    
-    <ExportWordModal 
-        v-model:visible="showWordExportModal" 
-        :questions="questionsForExport"
-    />
-
-    <QuestionBasketModal 
-        :isOpen="activeBasketId !== null"
-        :basketId="activeBasketId"
-        :baskets="baskets"
-        :knowledgeList="flatLeaves" 
-        @close="activeBasketId = null"
-        @update:basketId="(id) => activeBasketId = id"
-        @remove="(qid) => removeFromBasket(activeBasketId, qid)"
-        @clear="(bid) => baskets[bid] = []"
-        @export-pdf="handleExportPdf"
-        @export-word="handleExportWord"
-    />
-
+    <AddQuestionModal ref="addModalRef" v-model:visible="showAddModal" :subjectId="currentSubjectId" :knowledgeList="flatLeaves" :isPublic="currentMode === 'public'" @saved="handleQuestionSaved" />
+    <ExportQuestionsModal v-model:visible="showExportModal" :questions="questionsForExport" />
+    <ExportWordModal v-model:visible="showWordExportModal" :questions="questionsForExport" />
+    <QuestionBasketModal :isOpen="activeBasketId !== null" :basketId="activeBasketId" :baskets="baskets" :knowledgeList="flatLeaves" @close="activeBasketId = null" @update:basketId="(id) => activeBasketId = id" @remove="(qid) => removeFromBasket(activeBasketId, qid)" @clear="(bid) => baskets[bid] = []" @export-pdf="handleExportPdf" @export-word="handleExportWord" />
     <view class="fork-modal-overlay" v-if="showForkModal" @click="showForkModal=false">
         <view class="fork-modal-box" @click.stop>
             <view class="fm-title">加入我的题库</view>
             <view class="fm-tip">请选择您私人空间下的目标位置：</view>
-            <view class="fm-field">
-                <text class="fm-label">选择科目:</text>
-                <picker :range="privateSubjects" range-key="title" @change="handleForkSubChange">
-                    <view class="fm-picker">{{ selectedForkSub ? selectedForkSub.title : '请选择...' }}</view>
-                </picker>
-            </view>
-            <view class="fm-field" v-if="selectedForkSub">
-                <text class="fm-label">选择知识点:</text>
-                <picker :range="privateCategoriesFlat" range-key="fullPath" @change="handleForkCatChange">
-                    <view class="fm-picker">{{ selectedForkCat ? selectedForkCat.fullPath : '请选择...' }}</view>
-                </picker>
-            </view>
-            <view class="fm-actions">
-                <button class="fm-btn cancel" @click="showForkModal=false">取消</button>
-                <button class="fm-btn confirm" :disabled="!selectedForkCat" @click="confirmFork">确认克隆</button>
-            </view>
+            <view class="fm-field"><text class="fm-label">选择科目:</text><picker :range="privateSubjects" range-key="title" @change="handleForkSubChange"><view class="fm-picker">{{ selectedForkSub ? selectedForkSub.title : '请选择...' }}</view></picker></view>
+            <view class="fm-field" v-if="selectedForkSub"><text class="fm-label">选择知识点:</text><picker :range="privateCategoriesFlat" range-key="fullPath" @change="handleForkCatChange"><view class="fm-picker">{{ selectedForkCat ? selectedForkCat.fullPath : '请选择...' }}</view></picker></view>
+            <view class="fm-actions"><button class="fm-btn cancel" @click="showForkModal=false">取消</button><button class="fm-btn confirm" :disabled="!selectedForkCat" @click="confirmFork">确认克隆</button></view>
         </view>
     </view>
 
@@ -453,7 +333,9 @@ import ExportWordModal from '@/components/ExportWordModal.vue';
 import ManageSubjectModal from '@/components/ManageSubjectModal.vue';
 import ManageContentModal from '@/components/ManageContentModal.vue';
 import QuestionBasketModal from '@/components/QuestionBasketModal.vue';
+import PersonalCenter from '@/components/PersonalCenter.vue'; // [新增]
 import { onLoad } from '@dcloudio/uni-app';
+import { globalConfig, formatOptionLabel, formatSubIndex } from '@/utils/configStore.js';
 
 // --- 1. 变量定义 ---
 const currentMode = ref('private'); 
@@ -481,6 +363,11 @@ const currentPage = ref(1);
 
 const typeOptions = ref(['单选题','多选题','填空题','解答题']);
 const provinceOptions = ref([ "全国", "北京", "天津", "上海", "重庆", "河北", "山西", "内蒙古", "辽宁", "吉林", "黑龙江", "江苏", "浙江", "安徽", "福建", "江西", "山东", "河南", "湖北", "湖南", "广东", "广西", "海南", "四川", "贵州", "云南", "西藏", "陕西", "甘肃", "青海", "宁夏", "新疆" ]);
+
+const modeOptions = ref([
+  { label: '私人空间', value: 'private' },
+  { label: '官方空间', value: 'public' }
+]);
 
 const catSearch = ref('');
 const defaultTreeOpen = ref(false);
@@ -514,6 +401,9 @@ const privateCategoriesFlat = ref([]);
 const selectedForkSub = ref(null);
 const selectedForkCat = ref(null);
 
+const modeDropdownOpen = ref(false);
+const pageSizeDropdownOpen = ref(false);
+
 // --- 2. 生命周期 ---
 onLoad((options) => {
   if (options.mode === 'public') {
@@ -545,7 +435,7 @@ onUnmounted(() => {
   window.removeEventListener('click', handleGlobalClick);
 });
 
-// --- 3. API 请求 (修复 mode 参数缺失问题) ---
+// --- 3. API 请求 ---
 const reloadSubjects = async () => {
   try {
     const subData = await request({ 
@@ -591,7 +481,7 @@ const refreshFilters = async () => {
     const res = await request({ 
       url: '/api/filters', 
       method: 'GET', 
-      data: { subjectId: currentSubjectId.value, mode: currentMode.value } // 核心修复：带上 mode
+      data: { subjectId: currentSubjectId.value, mode: currentMode.value } 
     });
     if (res && res.types) {
         typeOptions.value = res.types.length ? res.types : ['单选题','多选题','填空题','解答题'];
@@ -654,6 +544,24 @@ const switchMode = (mode) => {
   currentPage.value = 1;
   selectedCategoryIds.value = [];
   reloadSubjects();
+};
+
+const handleModeChange = (e) => {
+  const index = e.detail.value;
+  const selectedMode = modeOptions.value[index].value;
+  switchMode(selectedMode);
+};
+
+const selectMode = (val) => {
+  switchMode(val);
+  modeDropdownOpen.value = false;
+};
+
+const selectPageSize = (size) => {
+  itemsPerPage.value = size;
+  currentPage.value = 1;
+  loadQuestions();
+  pageSizeDropdownOpen.value = false;
 };
 
 const openForkModal = async (q) => {
@@ -777,7 +685,13 @@ const handleKeyBasket = (e) => { if(waitingBasketKey.value && e.key >= '1' && e.
 const removeFromBasket = (bid, qid) => baskets.value[bid] = baskets.value[bid].filter(x => x.id !== qid);
 const handleExportPdf = () => { showExportModal.value = true; };
 const handleExportWord = () => { showWordExportModal.value = true; };
-const handleGlobalClick = (e) => { manageMenuOpen.value = false; subjectDropdownOpen.value = false; showJumpPopover.value = false; };
+const handleGlobalClick = (e) => { 
+  manageMenuOpen.value = false; 
+  subjectDropdownOpen.value = false; 
+  showJumpPopover.value = false;
+  modeDropdownOpen.value = false; 
+  pageSizeDropdownOpen.value = false;
+};
 
 // --- 5. Watchers & Computed ---
 watch([selectedType, selectedDiff, selectedProvince, selectedCategoryIds, selectedTags], () => {
@@ -792,6 +706,15 @@ const totalPages = computed(() => Math.ceil(questions.value.length / itemsPerPag
 const displayedQuestions = computed(() => questions.value.slice((currentPage.value-1)*itemsPerPage.value, currentPage.value*itemsPerPage.value));
 const provinceOptionsWithAll = computed(() => ['全部', ...provinceOptions.value]);
 const questionsForExport = computed(() => activeBasketId.value && baskets.value[activeBasketId.value] ? baskets.value[activeBasketId.value] : []);
+
+const currentModeLabel = computed(() => {
+  const mode = modeOptions.value.find(m => m.value === currentMode.value);
+  return mode ? mode.label : '私人空间';
+});
+
+const currentModeIndex = computed(() => {
+    return modeOptions.value.findIndex(m => m.value === currentMode.value);
+});
 
 const allActiveFilters = computed(() => {
   const list = [];
@@ -824,20 +747,18 @@ const visiblePages = computed(() => {
   }
   return arr;
 });
+
+const dynamicFontStyle = computed(() => {
+  return {
+    fontSize: `${globalConfig.fontSize}px`,
+    lineHeight: globalConfig.lineHeight
+  };
+});
 </script>
 
 <style lang="scss">
-/* 此处保持您的原始样式代码完全不变 */
 page { height: 100%; overflow: hidden; font-family: "Times New Roman", "SimSun", "Songti SC", serif;}
 .layout-shell { display: flex; width: 100%; height: 100vh; background-color: #ffffff; }
-
-/* 侧边栏模式切换 */
-.space-switcher { display: flex; background: #f1f5f9; padding: 4px; margin: 0 10px 15px 10px; border-radius: 6px; width: 85%; box-sizing: border-box; }
-.space-btn { flex: 1; text-align: center; font-size: 12px; padding: 4px 0; cursor: pointer; border-radius: 4px; color: #64748b; font-weight: bold; transition: all 0.2s; }
-.space-btn.active { background: white; color: #2563eb; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
-
-.space-switcher-mini { margin-bottom: 20px; text-align: center; }
-.space-char { display: inline-block; width: 28px; height: 28px; line-height: 28px; background: #eff6ff; color: #2563eb; font-weight: bold; border-radius: 50%; font-size: 14px; border: 1px solid #2563eb; }
 
 /* 禁用状态 */
 .tool-btn.disabled { opacity: 0.6; cursor: not-allowed; border-color: #f1f5f9; box-shadow: none; }
@@ -875,7 +796,7 @@ page { height: 100%; overflow: hidden; font-family: "Times New Roman", "SimSun",
 .collapse-btn:hover .collapse-icon { color: #2563eb; }
 .logo-area { color: #334155; font-weight: bold; font-size: 18px; margin-bottom: 30px; white-space: nowrap; height: 24px; display: flex; align-items: center; justify-content: center; }
 .logo-txt { transition: opacity 0.3s; }
-.nav-items { display: flex; flex-direction: column; gap: 5px; width: 100%; }
+.nav-items { display: flex; flex-direction: column; gap: 5px; width: 100%; flex: 1; }
 .nav-item { position: relative; height: 55px; display: flex; flex-direction: row; align-items: center; justify-content: center; cursor: pointer; color: #64748b; width: 98%; transition: all 0.3s; border-radius: 10px; }
 .nav-item.active { background: transparent; color: #f97316; }
 .nav-item.active::before { content: ''; position: absolute; left: 0; top: 50%; transform: translateY(-50%); width: 10px; height: 90%; background: radial-gradient(ellipse at left center, rgba(249, 115, 22, 0.6) 20%, rgba(249, 115, 22, 0) 70%); pointer-events: none; z-index: 0; transition: opacity 0.2s; opacity: 1; }
@@ -898,13 +819,100 @@ page { height: 100%; overflow: hidden; font-family: "Times New Roman", "SimSun",
 .mini-input:focus { background: white; border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37,99,235,0.1); }
 .mini-input.small { width: 60px; }
 .mini-input.medium { width: 140px; }
+
+/* 模式切换样式 */
+.mode-wrapper {
+  position: relative;
+  margin-right: 0px;
+}
+.mode-display {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 85px; 
+  cursor: pointer;
+  background: #ffffff;
+  transition: all 0.2s;
+}
+.mode-wrapper:hover .mode-display {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+.custom-mode-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  width: 100%;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  z-index: 100;
+  margin-top: 4px;
+  overflow: hidden;
+}
+.mode-item {
+  padding: 8px 0;
+  font-size: 13px;
+  color: #334155;
+  text-align: center;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.mode-item:hover { background: #f1f5f9; }
+.mode-item.active { color: #2563eb; font-weight: bold; background: #eff6ff; }
+.mode-arrow { width: 10px; height: 10px; opacity: 0.6; transform: rotate(180deg); margin-bottom: 0.8px; }
+
 .header-right { display: flex; align-items: center; gap: 20px; font-size: 13px; color: #64748b; }
 .total-count-box { display: flex; align-items: baseline; font-size: 13px; color: #64748b; }
 .tc-num { font-size: 18px; font-weight: bold; color: #334155; margin: 0 4px; font-family: monospace; }
 .page-size-wrap { display: flex; align-items: center; gap: 6px; }
 .ps-label { color: #64748b; }
-.ps-box { display: flex; align-items: center; background: white; border: 1px solid #e2e8f0; border-radius: 4px; padding: 6px 6px; height: 25px; box-sizing: border-box; cursor: pointer; transition: all 0.2s; }
-.ps-box:hover { border-color: #cbd5e1; background: #f8fafc; }
+
+/* 每页数量样式 */
+.page-size-wrapper {
+  position: relative;
+  margin: 0 4px;
+}
+.ps-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  padding: 0 8px;
+  height: 25px;
+  width: 60px;
+  box-sizing: border-box;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.page-size-wrapper:hover .ps-box { border-color: #cbd5e1; background: #f8fafc; }
+.custom-ps-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  width: 100%;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  z-index: 100;
+  margin-top: 4px;
+  overflow: hidden;
+  text-align: center;
+}
+.ps-item {
+  padding: 6px 0;
+  font-size: 13px;
+  color: #334155;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.ps-item:hover { background: #f1f5f9; }
+.ps-item.active { color: #2563eb; font-weight: bold; background: #eff6ff; }
+
 .ps-icon { width: 10px; height: 10px; margin-left: 8px; opacity: 0.6; transform: rotate(180deg); margin-bottom: 0.8px; }
 .ps-text { font-weight: 500; color: #334155; }
 .pagination-bar { display: flex; align-items: center; gap: 8px; margin-left: 10px; }
@@ -1004,23 +1012,24 @@ page { height: 100%; overflow: hidden; font-family: "Times New Roman", "SimSun",
 .sub-q-row { margin-bottom: 1px; padding: 8px; border-radius: 6px; transition: background 0.3s; }
 .sub-q-row.highlight-active { background-color: #fef2f2; }
 .sub-q-row.highlight-active .sub-q-txt :deep(.latex-text-container) { color: #ef4444; font-weight: bold; }
+.sub-indent { margin-left: 22px; }
 .sub-q-tags { display: flex; gap: 6px; margin-top: 4px; }
 .mini-tag { font-size: 10px; background: #f1f5f9; color: #94a3b8; padding: 1px 6px; border-radius: 4px; }
-.sub-q-ans-box { margin-top: 6px; font-size: 13px; color: #2563eb; background: #eff6ff; padding: 4px 8px; border-radius: 4px; }
+.sub-q-ans-box { margin-top: 6px; color: #2563eb; background: #eff6ff; padding: 4px 8px; border-radius: 4px; }
 .ans-label { font-weight: bold; margin-right: 5px; }
-.q-title { flex: 1; font-size: 15px; line-height: 1.6; color: #1e293b; }
-.opt-grid { display: grid; gap: 4px 8px; font-size: 14px; margin-bottom: 10px; color: #334155; }
-.opt-key { font-weight: bold; margin-right: 5px; flex-shrink: 0; font-size: 16px;}
-.opt-item { display: flex; align-items: center; margin-bottom: 0; }
+.q-title { flex: 1; line-height: 1.6; color: #1e293b; }
+.opt-grid { display: grid; gap: 4px 8px; margin-bottom: 10px; color: #334155; }
+.opt-key { font-weight: bold; margin-right: 5px; flex-shrink: 0; }
+.opt-item { display: flex; align-items: baseline; margin-bottom: 0; }
 .opt-item :deep(.latex-text-container) { flex: 1; width: auto; }
-.answer-box { background: #f0f9ff; padding: 12px 15px; border-radius: 6px; border: 1px dashed #bae6fd; font-size: 14px; color: #0c4a6e; }
-.ans-block { margin-bottom: 12px; }
+.answer-box { background: #f0f9ff; padding: 12px 15px; border-radius: 6px; border: 1px dashed #bae6fd; color: #0c4a6e; }
+.ans-block { margin-bottom: 0.8em; display: flex; align-items: baseline; }
 .ans-block:last-child { margin-bottom: 0; }
-.ans-tag { display: inline-block; padding: 2px 8px; border-radius: 4px; color: white; font-size: 12px; font-weight: bold; margin-bottom: 4px; }
+.ans-tag { display: inline-block; padding: 2px 8px; border-radius: 4px; color: white; font-size: 0.9em; font-weight: bold; margin-bottom: 0; margin-right: 8px; flex-shrink: 0; line-height: 1.2 !important; }
 .ans-tag.answer { background-color: #2563eb; } 
 .ans-tag.analysis { background-color: #f59e0b; } 
 .ans-tag.detailed { background-color: #10b981; } 
-.ans-content { font-size: 14px; line-height: 1.6; color: #334155; }
+.ans-content { color: #334155; flex: 1; }
 .q-footer { border-top: 1px solid #f1f5f9; margin-top: 10px; padding-top: 8px; display: flex; justify-content: space-between; align-items: center; }
 .tags-row { display: flex; gap: 8px; align-items: center; flex: 1; }
 .tag-badge { font-size: 11px; padding: 2px 6px; border-radius: 4px; cursor: pointer; display: flex;align-items: center; }

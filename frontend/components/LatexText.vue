@@ -1,11 +1,12 @@
 <template>
-  <view class="latex-text-container">
+  <view class="latex-text-container" :style="containerStyle">
     <mp-html :content="htmlContent" :copy-link="false" />
   </view>
 </template>
 
 <script setup>
 import { computed } from 'vue';
+import { globalConfig } from '../utils/configStore.js';
 
 const props = defineProps({
   text: {
@@ -112,13 +113,18 @@ const processText = (raw) => {
 const htmlContent = computed(() => {
   return processText(props.text);
 });
+
+const containerStyle = computed(() => {
+  return {
+    fontSize: `${globalConfig.fontSize}px`,
+    lineHeight: globalConfig.lineHeight
+  };
+});
 </script>
 
 <style lang="scss" scoped>
 .latex-text-container {
   width: 100%;
-  font-size: 15px;
-  line-height: 1.6;
   word-break: break-all;
   color: #333;
   
