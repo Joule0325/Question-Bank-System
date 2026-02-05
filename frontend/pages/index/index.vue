@@ -192,12 +192,44 @@
             <view v-for="q in displayedQuestions" :key="q.id" class="q-card">
               <view class="q-header">
                 <view class="meta-left">
-                  <text class="info-chip year">{{ q.year || '未知年份' }}</text>
-                  <text class="info-chip src">{{ q.source || '未知来源' }}</text>
-                  <text class="info-chip num">第 {{ q.qNumber || '-' }} 题</text>
+                  <view class="meta-dropdown-wrap" @click.stop="q.showYearDrop = !q.showYearDrop">
+                    <text class="info-chip year" :class="{ 'has-more': q.yearList.length > 1 }">{{ q.curYear || '未知年份' }}</text>
+                    <view class="meta-dropdown-list" v-if="q.showYearDrop && q.yearList.length > 1">
+                        <view v-for="(opt, oi) in q.yearList" :key="oi" class="meta-dropdown-item" @click.stop="q.curYear=opt; q.showYearDrop=false">{{ opt }}</view>
+                    </view>
+                  </view>
+
+                  <view class="meta-dropdown-wrap" @click.stop="q.showSourceDrop = !q.showSourceDrop">
+                    <text class="info-chip src" :class="{ 'has-more': q.sourceList.length > 1 }">{{ q.curSource || '未知来源' }}</text>
+                    <view class="meta-dropdown-list" v-if="q.showSourceDrop && q.sourceList.length > 1">
+                        <view v-for="(opt, oi) in q.sourceList" :key="oi" class="meta-dropdown-item" @click.stop="q.curSource=opt; q.showSourceDrop=false">{{ opt }}</view>
+                    </view>
+                  </view>
+
+                  <view class="meta-dropdown-wrap" @click.stop="q.showNumDrop = !q.showNumDrop">
+                    <text class="info-chip num" :class="{ 'has-more': q.numList.length > 1 }">第 {{ q.curNum || '-' }} 题</text>
+                    <view class="meta-dropdown-list" v-if="q.showNumDrop && q.numList.length > 1">
+                        <view v-for="(opt, oi) in q.numList" :key="oi" class="meta-dropdown-item" @click.stop="q.curNum=opt; q.showNumDrop=false">第 {{ opt }} 题</view>
+                    </view>
+                  </view>
+
                   <text class="info-chip diff">{{ '★'.repeat(q.difficulty) }}</text>
                   <text class="info-chip type">{{ q.type }}</text>
-                  <text class="info-chip prov" v-if="q.province">{{ q.province }}</text>
+                  
+                  <view class="meta-dropdown-wrap" @click.stop="q.showProvDrop = !q.showProvDrop">
+                    <text class="info-chip prov" v-if="q.curProv" :class="{ 'has-more': q.provList.length > 1 }">{{ q.curProv }}</text>
+                    <view class="meta-dropdown-list" v-if="q.showProvDrop && q.provList.length > 1">
+                        <view v-for="(opt, oi) in q.provList" :key="oi" class="meta-dropdown-item" @click.stop="q.curProv=opt; q.showProvDrop=false">{{ opt }}</view>
+                    </view>
+                  </view>
+                  
+                  <view class="fav-btn" @click.stop="toggleFav(q)">
+                    <image 
+                      class="star-icon" 
+                      :src="isFav(q.id) ? '/static/icons/星星-橙.svg' : '/static/icons/星星-灰.svg'"
+                      mode="aspectFit"
+                    ></image>
+                  </view>
                 </view>
                 <view class="meta-right">
                   <template v-if="currentMode === 'public'">
@@ -254,17 +286,35 @@
                 <view v-if="q.image && q.imgPosCode === 'r'" class="side-img-container"><image :src="q.image" class="q-image" mode="widthFix" /></view>
               </view>
               <view class="q-footer">
-                <view class="tags-row">
-                  <view v-for="tag in getKnowledgeTags(q.categoryIds)" :key="'k-'+(tag.id || tag.title)" class="tag-badge red" @click.stop="handleTagClick(tag.title || tag)">
-                    <image src="/static/icons/标签-红.svg" class="tag-icon icon-red" mode="aspectFit"></image><text>{{ tag.title || tag }}</text>
-                  </view>
-                  <view v-for="tag in (q.tags||[])" :key="'t-'+tag" class="tag-badge blue" @click.stop="handleTagClick(tag)">
-                    <image src="/static/icons/标签-蓝.svg" class="tag-icon icon-blue" mode="aspectFit"></image><text>{{ tag }}</text>
-                  </view>
+                <view class="tags-scroll-wrapper">
+                    <view class="scroll-btn left" v-if="tagsOverflowMap[q.id]" @click.stop="scrollTags(q.id, -1)">
+                        <image src="/static/icons/左-圆.svg" class="scroll-icon" mode="aspectFit"></image>
+                    </view>
+                
+                    <view class="tags-row" :id="'tags-row-' + q.id">
+                        <view v-for="tag in getKnowledgeTags(q.categoryIds)" :key="'k-'+(tag.id || tag.title)" class="tag-badge red" @click.stop="handleTagClick(tag.title || tag)">
+                            <image src="/static/icons/标签-红.svg" class="tag-icon icon-red" mode="aspectFit"></image><text>{{ tag.title || tag }}</text>
+                        </view>
+                        <view v-for="tag in (q.tags||[])" :key="'t-'+tag" class="tag-badge blue" @click.stop="handleTagClick(tag)">
+                            <image src="/static/icons/标签-蓝.svg" class="tag-icon icon-blue" mode="aspectFit"></image><text>{{ tag }}</text>
+                        </view>
+                    </view>
+                
+                    <view class="scroll-btn right" v-if="tagsOverflowMap[q.id]" @click.stop="scrollTags(q.id, 1)">
+                        <image src="/static/icons/右-圆.svg" class="scroll-icon" mode="aspectFit"></image>
+                    </view>
                 </view>
                 <view class="footer-right">
                     <text class="hash-code">#{{ q.code }}</text>
+                    <view class="select-icon-btn" @click.stop="toggleSelection(q.id)">
+                    <image 
+                      class="sel-icon" 
+                      :src="isSelected(q.id) ? '/static/icons/多选-选中.svg' : '/static/icons/多选.svg'" 
+                      mode="aspectFit" 
+                    />
+                    </view>
                     <view class="basket-add-btn-rect" :class="{waiting: waitingBasketKey===q.id}" @click.stop="toggleWaiting(q.id)">{{ waitingBasketKey===q.id ? '选择篮子...' : '加入试题篮' }}</view>
+                    
                 </view>
               </view>
             </view>
@@ -274,8 +324,31 @@
 
         <view class="right-toolbar">
           <text class="tool-head">工具</text>
-          <view v-if="canEdit" class="tool-btn primary" @click="openAddModal"><image src="/static/icons/添加.svg" class="tool-icon-img" mode="aspectFit"></image><text class="t-lbl">录题</text></view>
-          <view v-else class="tool-btn disabled"><image src="/static/icons/添加.svg" class="tool-icon-img" mode="aspectFit" style="filter:grayscale(1)"></image><text class="t-lbl" style="color:#94a3b8">只读</text></view>
+          
+          <view v-if="canEdit" class="tool-btn primary" @click="openAddModal">
+              <image src="/static/icons/添加.svg" class="tool-icon-img" mode="aspectFit"></image>
+              <text class="t-lbl">录题</text>
+          </view>
+          <view v-else class="tool-btn disabled">
+              <image src="/static/icons/添加.svg" class="tool-icon-img" mode="aspectFit" style="filter:grayscale(1)"></image>
+              <text class="t-lbl" style="color:#94a3b8">只读</text>
+          </view>
+          
+          <view class="tool-btn" @click="handleSelectAllPage" title="全选本页">
+              <image src="/static/icons/全选.svg" class="tool-icon-img" mode="aspectFit"></image>
+              <text class="t-lbl">全选</text>
+          </view>
+          
+          <view class="tool-btn" @click="handleBulkEdit" title="批量编辑">
+              <image src="/static/icons/编辑.svg" class="tool-icon-img" mode="aspectFit"></image>
+              <text class="t-lbl">批编</text>
+          </view>
+          
+          <view class="tool-btn red" @click="handleBulkDelete" title="批量删除">
+              <image src="/static/icons/删除.svg" class="tool-icon-img" mode="aspectFit"></image>
+              <text class="t-lbl">批删</text>
+          </view>
+
           <view class="divider"></view>
           <text class="tool-head">试题篮</text>
           <view class="basket-col">
@@ -292,7 +365,7 @@
     </view>
 
     <view class="main-workspace" v-else-if="activeTab === 'my'">
-        <view class="my-wrapper" style="padding: 15px; height: 100%; box-sizing: border-box; background-color: #f8fafc;">
+        <view class="my-wrapper" style="padding: 0; height: 100%; box-sizing: border-box; background-color: #f8fafc;">
             <PersonalCenter />
         </view>
     </view>
@@ -317,11 +390,32 @@
         </view>
     </view>
 
+    <view class="fork-modal-overlay" v-if="showFavModal" @click="showFavModal=false">
+        <view class="fork-modal-box" @click.stop>
+            <view class="fm-title">添加到收藏夹</view>
+            <view class="fm-tip">请选择目标收藏夹：</view>
+            <view class="fm-list">
+                <view 
+                    v-for="folder in favFolders" 
+                    :key="folder.id" 
+                    class="fm-item" 
+                    @click="confirmFav(folder.id)"
+                >
+                    📂 {{ folder.name }}
+                </view>
+            </view>
+            <view class="fm-actions">
+                <button class="fm-btn cancel" @click="showFavModal=false">取消</button>
+            </view>
+        </view>
+    </view>
+
   </view>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue';
+// 👇 加上 nextTick
+import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { request } from '@/utils/request.js';
 import { getQuestions, deleteQuestion } from '@/api/question.js';
 import CategoryTree from '@/components/CategoryTree.vue';
@@ -333,7 +427,7 @@ import ExportWordModal from '@/components/ExportWordModal.vue';
 import ManageSubjectModal from '@/components/ManageSubjectModal.vue';
 import ManageContentModal from '@/components/ManageContentModal.vue';
 import QuestionBasketModal from '@/components/QuestionBasketModal.vue';
-import PersonalCenter from '@/components/PersonalCenter.vue'; // [新增]
+import PersonalCenter from '@/components/PersonalCenter.vue';
 import { onLoad } from '@dcloudio/uni-app';
 import { globalConfig, formatOptionLabel, formatSubIndex } from '@/utils/configStore.js';
 
@@ -404,6 +498,15 @@ const selectedForkCat = ref(null);
 const modeDropdownOpen = ref(false);
 const pageSizeDropdownOpen = ref(false);
 
+// 收藏相关
+const favFolders = ref([]);
+const favMap = ref({}); // { questionId: folderId }
+const showFavModal = ref(false);
+const currentFavQid = ref(null);
+
+// [新增] 批量选择相关
+const selectedQuestionIds = ref(new Set());
+
 // --- 2. 生命周期 ---
 onLoad((options) => {
   if (options.mode === 'public') {
@@ -424,16 +527,62 @@ onMounted(async () => {
 
   if (token) currentUser.value = user;
   
+  loadFavData(); // 加载收藏数据
   await reloadSubjects(); 
   
   window.addEventListener('keydown', handleKeyBasket);
   window.addEventListener('click', handleGlobalClick);
+  window.addEventListener('resize', checkTagsOverflow);
 });
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyBasket);
   window.removeEventListener('click', handleGlobalClick);
+  window.removeEventListener('resize', checkTagsOverflow);
 });
+
+// 收藏相关逻辑
+const loadFavData = () => {
+    const folders = uni.getStorageSync('USER_FAV_FOLDERS');
+    const data = uni.getStorageSync('USER_FAV_DATA');
+    
+    if (folders) favFolders.value = JSON.parse(folders);
+    else {
+        favFolders.value = [{ id: 1, name: '默认收藏夹' }];
+        uni.setStorageSync('USER_FAV_FOLDERS', JSON.stringify(favFolders.value));
+    }
+    
+    if (data) favMap.value = JSON.parse(data);
+    else favMap.value = {};
+};
+
+const isFav = (qid) => {
+    return !!favMap.value[qid];
+};
+
+const toggleFav = (q) => {
+    if (isFav(q.id)) {
+        // 取消收藏
+        delete favMap.value[q.id];
+        uni.setStorageSync('USER_FAV_DATA', JSON.stringify(favMap.value));
+        uni.showToast({ title: '已取消收藏', icon: 'none' });
+    } else {
+        // 打开收藏夹选择
+        loadFavData();
+        currentFavQid.value = q.id;
+        showFavModal.value = true;
+    }
+};
+
+const confirmFav = (folderId) => {
+    if (currentFavQid.value) {
+        favMap.value[currentFavQid.value] = folderId;
+        uni.setStorageSync('USER_FAV_DATA', JSON.stringify(favMap.value));
+        uni.showToast({ title: '收藏成功', icon: 'success' });
+        showFavModal.value = false;
+        currentFavQid.value = null;
+    }
+};
 
 // --- 3. API 请求 ---
 const reloadSubjects = async () => {
@@ -492,6 +641,8 @@ const refreshFilters = async () => {
 const loadQuestions = async () => {
   if (!currentSubjectId.value) return;
   loading.value = true;
+  selectedQuestionIds.value.clear(); // 切换条件时清空选择
+  
   const params = { subjectId: currentSubjectId.value, mode: currentMode.value };
   
   if (selectedType.value !== '全部') params.type = selectedType.value;
@@ -527,12 +678,74 @@ const loadQuestions = async () => {
               else { const h = imgPosCode.charAt(1) || 'm'; imgAlign = h === 'l' ? 'left' : (h === 'r' ? 'right' : 'center'); }
           }
       }
-      return { ...q, options: parsedOptions, tags: q.tags || [], code: q.code || 'A' + q.id.toString().substr(-4), imgPosCode, imgAlign };
+
+      // [新增] 处理多值字段下拉逻辑
+      const split = (s) => s ? String(s).split('/').map(i=>i.trim()).filter(x=>x) : [];
+      const yearList = split(q.year);
+      const sourceList = split(q.source);
+      const provList = split(q.province);
+      const numList = split(q.qNumber);
+
+      return { 
+          ...q, 
+          options: parsedOptions, 
+          tags: q.tags || [], 
+          code: q.code || 'A' + q.id.toString().substr(-4), 
+          imgPosCode, 
+          imgAlign,
+          // Dropdown props
+          yearList, curYear: yearList[0] || '', showYearDrop: false,
+          sourceList, curSource: sourceList[0] || '', showSourceDrop: false,
+          provList, curProv: provList[0] || '', showProvDrop: false,
+          numList, curNum: numList[0] || '', showNumDrop: false
+      };
     });
   } catch (e) { console.error(e); } finally { loading.value = false; }
 };
 
 // --- 4. 业务方法 ---
+// [新增] 批量选择逻辑
+const isSelected = (id) => selectedQuestionIds.value.has(id);
+const toggleSelection = (id) => {
+    if (selectedQuestionIds.value.has(id)) selectedQuestionIds.value.delete(id);
+    else selectedQuestionIds.value.add(id);
+};
+
+const handleSelectAllPage = () => {
+    const ids = displayedQuestions.value.map(q => q.id);
+    const allSelected = ids.every(id => selectedQuestionIds.value.has(id));
+    if (allSelected) {
+        ids.forEach(id => selectedQuestionIds.value.delete(id));
+    } else {
+        ids.forEach(id => selectedQuestionIds.value.add(id));
+    }
+};
+
+const handleBulkDelete = () => {
+    if (selectedQuestionIds.value.size === 0) return uni.showToast({title: '请先选择题目', icon: 'none'});
+    uni.showModal({
+        content: `确定删除选中的 ${selectedQuestionIds.value.size} 道题目吗？`,
+        success: async (res) => {
+            if (res.confirm) {
+                for (const id of selectedQuestionIds.value) {
+                    await deleteQuestion(id);
+                }
+                selectedQuestionIds.value.clear();
+                loadQuestions();
+                uni.showToast({title: '删除成功', icon: 'success'});
+            }
+        }
+    });
+};
+
+const handleBulkEdit = () => {
+    if (selectedQuestionIds.value.size === 0) return uni.showToast({title: '请先选择题目', icon: 'none'});
+    const selectedQs = questions.value.filter(q => selectedQuestionIds.value.has(q.id));
+    showAddModal.value = true;
+    // 传入数组触发批量编辑模式
+    addModalRef.value?.open(selectedQs);
+};
+
 const switchMode = (mode) => {
   if(currentMode.value === mode) return;
   if (mode === 'private' && !uni.getStorageSync('token')) {
@@ -754,6 +967,62 @@ const dynamicFontStyle = computed(() => {
     lineHeight: globalConfig.lineHeight
   };
 });
+
+// [核心修复] 使用 ID 定位滚动的元素
+const scrollTags = (qid, direction) => {
+    // 假设是 H5 环境，直接用 document 获取
+    const el = document.getElementById('tags-row-' + qid);
+    if (el) {
+        el.scrollBy({
+            left: direction * 100, 
+            behavior: 'smooth'
+        });
+    }
+};
+
+// [新增] 存储每个题目是否需要显示滑动按钮的状态 { id: true/false }
+const tagsOverflowMap = ref({});
+
+const checkTagsOverflow = () => {
+    // 延时确保 DOM 渲染完成
+    setTimeout(() => {
+        const newMap = {}; // 1. 创建一个新对象
+        
+        displayedQuestions.value.forEach(q => {
+            const el = document.getElementById('tags-row-' + q.id);
+            if (el) {
+                // 2. 判定逻辑
+                const isOverflow = el.scrollWidth > el.clientWidth;
+                newMap[q.id] = isOverflow;
+                
+                // 调试用，确认计算结果（如果已解决可删除）
+                // console.log(`题${q.id}: 内容${el.scrollWidth} > 可视${el.clientWidth} ? ${isOverflow}`);
+            }
+        });
+        
+        // 3. 【关键】整体替换，强制通知 Vue 重新渲染模板中的 v-if
+        tagsOverflowMap.value = newMap;
+    }, 300);
+};
+
+// [修改] 监听逻辑
+watch(() => displayedQuestions.value, () => {
+    // 数据变化后，先给足够时间让 v-for 渲染
+    nextTick(() => {
+        checkTagsOverflow();
+    });
+}, { immediate: true, deep: true });
+
+// [新增] 窗口大小改变时重新计算
+onMounted(() => {
+    window.addEventListener('resize', checkTagsOverflow);
+    // 页面加载后额外触发一次，防止字体加载延迟
+    setTimeout(checkTagsOverflow, 1000); 
+});
+
+onUnmounted(() => {
+    window.removeEventListener('resize', checkTagsOverflow);
+});
 </script>
 
 <style lang="scss">
@@ -777,6 +1046,46 @@ page { height: 100%; overflow: hidden; font-family: "Times New Roman", "SimSun",
 .fm-btn.cancel { background: #f1f5f9; color: #64748b; }
 .fm-btn.confirm { background: #2563eb; color: white; }
 .fm-btn.confirm:disabled { background: #94a3b8; cursor: not-allowed; }
+
+/* 收藏图标 */
+.fav-btn {
+  display: flex; align-items: center; margin-left: 12px; cursor: pointer; transition: transform 0.2s;
+}
+.fav-btn:active { transform: scale(1.2); }
+.star-icon { width: 16px; height: 16px; display: block; }
+
+/* 删除原来的 .select-btn 样式，添加下面这些 */
+
+.select-icon-btn {
+    margin-right: 4px;
+	margin-left: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    /* 移除原来的边框和背景，纯靠图片展示 */
+}
+
+.sel-icon {
+    width: 26px;  /* 根据你的 svg 实际大小微调，一般 20-24px 合适 */
+    height: 26px;
+    display: block;
+}
+
+/* 鼠标悬停时的微互动（可选） */
+.select-icon-btn:hover {
+    opacity: 0.8;
+}
+
+/* 批量工具按钮文本 */
+.t-lbl-s { font-size: 11px; margin-top: 4px; line-height: 1; font-weight: 500; color: #475569; }
+.tool-btn.red .t-lbl-s { color: #ef4444; }
+.tool-btn.small { height: 36px; margin-bottom: 8px; }
+
+/* 收藏夹列表样式补全 */
+.fm-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; max-height: 300px; overflow-y: auto; }
+.fm-item { padding: 12px; background: #f8fafc; border-radius: 6px; cursor: pointer; font-size: 14px; color: #334155; border: 1px solid #e2e8f0; transition: all 0.2s; }
+.fm-item:hover { background: #eff6ff; border-color: #2563eb; color: #2563eb; font-weight: bold; }
 
 .subject-btn.public-mode { background: #2563eb; box-shadow: 0 0px 6px rgba(37, 99, 235, 0.5); }
 .subject-btn { background:#F87F23; } 
@@ -995,7 +1304,7 @@ page { height: 100%; overflow: hidden; font-family: "Times New Roman", "SimSun",
 .q-card { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin-bottom: 16px;margin-right: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
 .q-header { display: flex; justify-content: space-between; font-size: 12px; color: #64748b; margin-bottom: 10px; }
 .meta-left { display: flex; gap: 6px; flex-wrap: wrap; }
-.info-chip { padding: 2px 8px; border-radius: 4px; background: #f1f5f9; color: #64748b; font-size: 11px; display: flex; align-items: center; }
+.info-chip { padding: 2px 8px; border-radius: 4px; background: #f1f5f9; color: #64748b; font-size: 11px; display: flex; align-items: center; position: relative; }
 .info-chip.type { color: #2563eb; background: #eff6ff; font-weight: bold; }
 .info-chip.diff { color: #f59e0b; background: #fffbeb; }
 .info-chip.err { color: #ef4444; background: #fef2f2; font-weight: bold; }
@@ -1022,7 +1331,13 @@ page { height: 100%; overflow: hidden; font-family: "Times New Roman", "SimSun",
 .opt-key { font-weight: bold; margin-right: 5px; flex-shrink: 0; }
 .opt-item { display: flex; align-items: baseline; margin-bottom: 0; }
 .opt-item :deep(.latex-text-container) { flex: 1; width: auto; }
-.answer-box { background: #f0f9ff; padding: 12px 15px; border-radius: 6px; border: 1px dashed #bae6fd; color: #0c4a6e; }
+.answer-box { 
+    background: #f0f9ff; 
+    padding: 12px 15px; 
+    border-radius: 6px;  /* 这里加分号 */
+    border: 1px dashed #bae6fd; 
+    color: #0c4a6e; 
+}
 .ans-block { margin-bottom: 0.8em; display: flex; align-items: baseline; }
 .ans-block:last-child { margin-bottom: 0; }
 .ans-tag { display: inline-block; padding: 2px 8px; border-radius: 4px; color: white; font-size: 0.9em; font-weight: bold; margin-bottom: 0; margin-right: 8px; flex-shrink: 0; line-height: 1.2 !important; }
@@ -1030,16 +1345,84 @@ page { height: 100%; overflow: hidden; font-family: "Times New Roman", "SimSun",
 .ans-tag.analysis { background-color: #f59e0b; } 
 .ans-tag.detailed { background-color: #10b981; } 
 .ans-content { color: #334155; flex: 1; }
-.q-footer { border-top: 1px solid #f1f5f9; margin-top: 10px; padding-top: 8px; display: flex; justify-content: space-between; align-items: center; }
-.tags-row { display: flex; gap: 8px; align-items: center; flex: 1; }
-.tag-badge { font-size: 11px; padding: 2px 6px; border-radius: 4px; cursor: pointer; display: flex;align-items: center; }
+.q-footer { border-top: 1px solid #f1f5f9; margin-top: 10px; padding-top: 10px; display: flex; justify-content: space-between; align-items: center; }
+/* 1. 外层包装器：控制整体布局 */
+
+/* 2. 中间滚动区 */
+.tags-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    
+    flex: 1;            
+    
+    /* 👇 【关键修改】添加这行，防止在 Flex 容器中被压缩成 0 */
+    width: 100%;        
+    /* 或者用 width: 0; min-width: 0; 也可以，但在某些浏览器 width: 100% 更稳 */
+    
+    overflow-x: auto;   
+    overflow-y: hidden;
+    white-space: nowrap;
+    scrollbar-width: none; 
+    -ms-overflow-style: none;  
+    padding: 0 4px; 
+}
+
+/* 顺便检查外层容器，确保没有 hidden 导致内容看不见 */
+.tags-scroll-wrapper {
+    display: flex;
+    align-items: center;
+    flex: 1;            
+    min-width: 0;       
+    margin-right: 15px; 
+    gap: 8px;
+    /* overflow: hidden;  <-- 如果有这行，建议先注释掉，防止调试时误伤 */
+}
+
+/* 2. 左右按钮样式 */
+/* 左右圆形按钮容器 */
+.scroll-btn {
+    width: 16px;        /* 稍微调大一点，方便点击 */
+    height: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    opacity: 0.5;       /* 默认稍淡一点 */
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); /* 平滑过渡动画 */
+	opacity: 1;
+}
+
+/* 鼠标悬停效果：变不透明 + 放大 1.2倍 */
+.scroll-btn:hover {
+    opacity: 1;
+    transform: scale(1.1); 
+}
+
+/* 图标本身 */
+.scroll-icon {
+    width: 100%;       /* 填满容器 */
+    height: 100%;
+    display: block;
+	filter: invert(44%) sepia(96%) saturate(1476%) hue-rotate(207deg) brightness(93%) contrast(93%);
+}
+
+
+/* 彻底隐藏 Webkit (Chrome/Safari) 滚动条 */
+.tags-row::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+}
+.tag-badge { font-size: 11px; padding: 2px 6px; border-radius: 4px; cursor: pointer; display: flex;align-items: center; flex-shrink: 0;}
 .tag-badge.red { background: #fef2f2; color: #ef4444; border: 1px solid #fee2e2; }
 .tag-badge.blue { background: #eff6ff; color: #3b82f6; border: 1px solid #dbeafe; }
 .tag-icon { width: 12px; height: 12px; margin-right: 4px; display: block; }
 .tag-badge text { line-height: 1; position: relative; top: -0.1px; }
-.footer-right { display: flex; align-items: center; gap: 10px; }
+.footer-right { display: flex; align-items: center;  }
 .hash-code { font-family: monospace; color: #cbd5e1; font-size: 11px; }
-.basket-add-btn-rect { padding: 4px 10px; border-radius: 4px; border: 1px solid #2563eb; color: #2563eb; font-size: 11px; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; font-weight: 500; }
+.basket-add-btn-rect { padding: 2px 3px; border-radius: 2px; border: 1px solid #2563eb; color: #2563eb; font-size: 11px; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; font-weight: 500; }
 .basket-add-btn-rect:hover { background: #eff6ff; }
 .basket-add-btn-rect.waiting { background: #2563eb; color: white; animation: pulse 1s infinite; }
 .img-container { margin: 10px 0; display: flex; width: 100%; }
@@ -1063,4 +1446,12 @@ page { height: 100%; overflow: hidden; font-family: "Times New Roman", "SimSun",
 .whiteboard-wrapper { width: 100%; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
 @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
 .mt-2 { margin-top: 8px; }
+
+/* 下拉框样式 */
+.meta-dropdown-wrap { position: relative; display: inline-block; }
+.meta-dropdown-list { position: absolute; top: 100%; left: 0; background: white; border: 1px solid #e2e8f0; z-index: 99; border-radius: 4px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); min-width: 100%; white-space: nowrap; margin-top: 2px; }
+.meta-dropdown-item { padding: 6px 10px; font-size: 11px; color: #64748b; cursor: pointer; transition: background 0.2s; }
+.meta-dropdown-item:hover { background: #f1f5f9; color: #2563eb; }
+.info-chip.has-more { cursor: pointer; padding-right: 20px; }
+.info-chip.has-more::after { content: '▼'; font-size: 8px; position: absolute; right: 6px; opacity: 0.5; top: 50%; transform: translateY(-50%); }
 </style>

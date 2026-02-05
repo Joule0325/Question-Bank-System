@@ -3,20 +3,13 @@
     <view class="app-wrapper">
       
       <view class="sidebar">
-        <view class="logo-area">
-          <view class="logo-icon">E</view>
-          <text class="logo-text">ExamPro</text>
-        </view>
         <view class="nav-list">
-          <view class="nav-item active"><text class="nav-icon">🏠</text> 个人首页</view>
-          <view class="nav-item"><text class="nav-icon">📄</text> 组卷/讲义</view>
-          <view class="nav-item"><text class="nav-icon">🏷️</text> 标签管理</view>
-          <view class="nav-item"><text class="nav-icon">⭐</text> 收藏夹</view>
-          <view class="nav-item"><text class="nav-icon">🧾</text> 我的订单</view>
-        </view>
-        <view class="nav-footer">
-          <view class="nav-item logout"><text class="nav-icon">🚪</text> 退出登录</view>
-        </view>
+                  <view class="nav-item active">个人首页</view>
+                  <view class="nav-item">组卷/讲义</view>
+                  <view class="nav-item">标签管理</view>
+                  <view class="nav-item">收藏夹</view>
+                  <view class="nav-item">我的订单</view>
+                </view>
       </view>
 
       <view class="main-content">
@@ -307,51 +300,28 @@ const restoreDefault = () => {
 
 /* 左侧导航 */
 .sidebar {
-  width: 200px;
+  width: 120px;
   background: #f8fafc;
   border-right: 1px solid #e2e8f0;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  padding: 20px 0;
 }
 
-.logo-area {
-  padding: 0 24px 30px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.logo-icon {
-  width: 32px;
-  height: 32px;
-  background: #2563eb;
-  color: white;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: bold;
-}
-
-.logo-text {
-  font-size: 18px;
-  font-weight: 800;
-  color: #1e293b;
-}
+/* 移除 Logo 样式，此处留空或直接删除 .logo-area, .logo-icon, .logo-text */
 
 .nav-list {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 0 12px;
+  gap: 8px;
+  /* 调整左右内边距，减少左侧空白，原先是 0 12px */
+  padding: 0px 10px 0px 0px; 
 }
 
 .nav-item {
-  padding: 12px 16px;
-  border-radius: 8px;
+  padding: 8px 8px;
+  border-radius: 4px;
   font-size: 14px;
   color: #64748b;
   cursor: pointer;
@@ -364,7 +334,7 @@ const restoreDefault = () => {
   &:hover { background: #e2e8f0; color: #334155; }
   &.active { background: #eff6ff; color: #2563eb; font-weight: bold; }
 }
-.nav-footer { padding: 0 12px; }
+.nav-footer { padding: 0 8px; /* 同样对齐底部 padding */ }
 .nav-item.logout { color: #ef4444; &:hover { background: #fef2f2; } }
 
 /* 右侧主内容容器 */

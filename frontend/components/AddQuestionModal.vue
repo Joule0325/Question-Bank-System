@@ -14,7 +14,6 @@
             <button class="menu-btn" style="color: #7c3aed; border-color: #7c3aed; margin-right: 15px;" @click="openOCRModal">
                 ✨ 智能识别
             </button>
-
             <button class="menu-btn primary" @click="handleSave">保存</button>
             <button class="menu-btn" @click="close">退出</button>
             <button class="menu-btn outline" @click="handleSaveAndExit">保存并退出</button>
@@ -69,14 +68,42 @@
             
             <view class="q-header">
               <view class="meta-left">
-                <text class="info-chip year">{{ item.year }}</text>
-                <text class="info-chip src">{{ item.source }}</text>
-                <text class="info-chip num">第 {{ item.qNumber }} 题</text>
+                <view class="meta-dropdown-wrap" @click.stop="item.showYearDrop = !item.showYearDrop">
+                    <text class="info-chip year" :class="{ 'has-more': item.yearList.length > 1 }">{{ item.curYear || '年份' }}</text>
+                    <view class="meta-dropdown-list" v-if="item.showYearDrop && item.yearList.length > 1">
+                        <view v-for="(opt, oi) in item.yearList" :key="oi" class="meta-dropdown-item" @click.stop="item.curYear=opt; item.showYearDrop=false">{{ opt }}</view>
+                    </view>
+                </view>
+
+                <view class="meta-dropdown-wrap" @click.stop="item.showSourceDrop = !item.showSourceDrop">
+                    <text class="info-chip src" :class="{ 'has-more': item.sourceList.length > 1 }">{{ item.curSource || '来源' }}</text>
+                    <view class="meta-dropdown-list" v-if="item.showSourceDrop && item.sourceList.length > 1">
+                        <view v-for="(opt, oi) in item.sourceList" :key="oi" class="meta-dropdown-item" @click.stop="item.curSource=opt; item.showSourceDrop=false">{{ opt }}</view>
+                    </view>
+                </view>
+
+                <view class="meta-dropdown-wrap" @click.stop="item.showNumDrop = !item.showNumDrop">
+                    <text class="info-chip num" :class="{ 'has-more': item.numList.length > 1 }">第 {{ item.curNum || '-' }} 题</text>
+                    <view class="meta-dropdown-list" v-if="item.showNumDrop && item.numList.length > 1">
+                        <view v-for="(opt, oi) in item.numList" :key="oi" class="meta-dropdown-item" @click.stop="item.curNum=opt; item.showNumDrop=false">第 {{ opt }} 题</view>
+                    </view>
+                </view>
+
                 <text class="info-chip diff">{{ '★'.repeat(item.difficulty || 0) }}</text>
                 <text class="info-chip type">{{ item.type }}</text>
-                <text class="info-chip prov" v-if="item.region">{{ item.region }}</text>
-                <text class="info-chip prov err" v-else-if="item._regionErr">(地区错误)</text>
-                <text class="info-chip prov" v-else style="color:#999">(未设置)</text>
+                
+                <view class="meta-dropdown-wrap" @click.stop="item.showProvDrop = !item.showProvDrop">
+                    <text class="info-chip prov" v-if="item.curProv" :class="{ 'has-more': item.provList.length > 1 }">{{ item.curProv }}</text>
+                    <text class="info-chip prov err" v-else-if="item._regionErr">(地区错误)</text>
+                    <text class="info-chip prov" v-else style="color:#999">(未设置)</text>
+                    <view class="meta-dropdown-list" v-if="item.showProvDrop && item.provList.length > 1">
+                        <view v-for="(opt, oi) in item.provList" :key="oi" class="meta-dropdown-item" @click.stop="item.curProv=opt; item.showProvDrop=false">{{ opt }}</view>
+                    </view>
+                </view>
+
+                <view class="fav-btn" style="cursor: default; opacity: 0.8;">
+                   <image class="star-icon" :src="item.isFavorite ? '/static/icons/星星-橙.svg' : '/static/icons/星星-灰.svg'" mode="aspectFit"></image>
+                </view>
               </view>
               <view class="meta-right"><text class="seq-num">No.{{ currentMode === -1 ? (idx + 1) : (currentMode + 1) }}</text></view>
             </view>
@@ -324,9 +351,8 @@ const selectedModel = ref('Qwen');
 const modelOptions = [
   { label: 'Qwen (通义千问)', value: 'Qwen' },
   { label: 'DeepSeek V3', value: 'DeepSeek' },
-  { label: 'Gemini 2.5 Pro', value: 'Gemini' } // label给人看，value给后端
+  { label: 'Gemini 2.5 Pro', value: 'Gemini' } 
 ];
-
 
 const getClientX = (e) => e.clientX ?? (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
 const getClientY = (e) => e.clientY ?? (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
@@ -425,10 +451,15 @@ D. 选项D
 ##详解 
 `;
 
-const open = (questionData = null) => {
+const open = (questionDataOrArray = null) => {
   emit('update:visible', true);
-  if (questionData) initEdit(questionData);
-  else initAdd();
+  if (Array.isArray(questionDataOrArray)) {
+      initBatchEdit(questionDataOrArray);
+  } else if (questionDataOrArray) {
+      initEdit(questionDataOrArray);
+  } else {
+      initAdd();
+  }
 };
 
 const close = () => { emit('update:visible', false); };
@@ -442,17 +473,11 @@ const initAdd = () => {
   currentMode.value = -1;
   fullTextCache.value = '';
   cachedPreviewList.value = [];
-  parseTemplate();
+  nextTick(() => { parseTemplate(); });
 };
 
-const initEdit = (q) => {
-  isEditing.value = true;
-  editingId.value = q.id;
-  currentMode.value = -1;
-  cachedPreviewList.value = [];
-  tempUploadedImages.value = {};
-  for(const k in imageSizes) delete imageSizes[k];
-  
+// [修改] 辅助函数：生成单题文本，带 ##ID (批量编辑需要ID来区分是新增还是修改)
+const generateQuestionTemplate = (q) => {
   const restoreTags = (str) => {
       if (!str) return '';
       let s = str;
@@ -462,7 +487,7 @@ const initEdit = (q) => {
   };
 
   let regionStr = q.province || ''; 
-
+  // 注意：##ID 是系统内部用于识别更新的标签，请勿删除
   let text = `##年份 ${q.year || ''}
 ##地区 ${regionStr}
 ##来源 ${q.source || ''}
@@ -488,19 +513,55 @@ ${restoreTags(q.title || '')}
       });
       text += `##答案 \n${restoreTags(q.answer || '')}\n##分析 \n${restoreTags(q.analysis || '')}\n##详解 \n${restoreTags(q.detailed || '')}\n`;
   } else if (q.type && q.type.includes('选')) {
-      text += `##选项 ${q.optionLayout || 4}\n`; 
-      if(q.options) {
-        Object.keys(q.options).sort().forEach(k => { text += `${k}.${q.options[k]}\n`; });
+      const hasOpts = q.options && Object.keys(q.options).length > 0;
+      if (hasOpts) {
+          text += `##选项 ${q.optionLayout || 4}\n`; 
+          Object.keys(q.options).sort().forEach(k => { text += `${k}.${q.options[k]}\n`; });
       }
       text += `##答案 \n${restoreTags(q.answer || '')}\n##分析 \n${restoreTags(q.analysis || '')}\n##详解 \n${restoreTags(q.detailed || '')}\n`;
   } else {
       text += `##答案 \n${restoreTags(q.answer || '')}\n##分析 \n${restoreTags(q.analysis || '')}\n##详解 \n${restoreTags(q.detailed || '')}\n`;
   }
-  
+  return text;
+};
+
+// 单题编辑
+const initEdit = (q) => {
+  isEditing.value = true;
+  editingId.value = q.id;
+  currentMode.value = -1;
+  cachedPreviewList.value = [];
+  tempUploadedImages.value = {};
+  for(const k in imageSizes) delete imageSizes[k];
+
+  let processedText = processImagesInText(generateQuestionTemplate(q));
+  inputRawText.value = processedText;
+  nextTick(() => { parseTemplate(); });
+};
+
+// [核心修复] 批量编辑初始化
+const initBatchEdit = (questions) => {
+    isEditing.value = true;
+    editingId.value = null; 
+    currentMode.value = -1;
+    cachedPreviewList.value = [];
+    tempUploadedImages.value = {};
+    for(const k in imageSizes) delete imageSizes[k];
+
+    const textParts = questions.map(q => processImagesInText(generateQuestionTemplate(q)));
+    inputRawText.value = textParts.join('\n\n===\n\n');
+    
+    // 使用 nextTick 确保数据赋值完成后再执行解析，解决无法预览的问题
+    nextTick(() => {
+        parseTemplate();
+    });
+};
+
+const processImagesInText = (text) => {
   const tagRegex = /\[img:([^\]]+)\]/g; 
   let imgCounter = 1; 
   
-  const processedText = text.replace(tagRegex, (match, innerContent) => {
+  return text.replace(tagRegex, (match, innerContent) => {
       const parts = innerContent.split(':');
       let width = null;
       let align = null;
@@ -511,7 +572,7 @@ ${restoreTags(q.title || '')}
       const url = parts.join(':');
 
       if (url.startsWith('http') || url.startsWith('blob')) {
-          const tempId = `IMG_${imgCounter++}`;
+          const tempId = `IMG_${Date.now()}_${imgCounter++}`; 
           tempUploadedImages.value[tempId] = url;
           imageSizes[tempId] = width ? parseInt(width) : 100;
           let newTag = `[img:${tempId}`;
@@ -523,9 +584,6 @@ ${restoreTags(q.title || '')}
       }
       return match;
   });
-
-  inputRawText.value = processedText;
-  parseTemplate();
 };
 
 const handleGlobalClick = () => { if (activeArea.value !== 'left') showKpDropdown.value = false; };
@@ -679,8 +737,9 @@ const parseTemplate = () => {
       if(!chunk.content.trim()) return;
       if(/^\s*##/m.test(chunk.content)) {
           const q = parseSingleChunk(chunk.content, chunk.start);
-          if (q.title || q.type) {
-              if (isEditing.value && newList.length === 0 && editingId.value) q.id = editingId.value;
+          // 只要有内容，即使没有标题也尝试解析，避免逻辑阻断
+          if (q.title || q.type || q.id) {
+              if (isEditing.value && !q.id && newList.length === 0 && editingId.value) q.id = editingId.value;
               newList.push(q);
               if (q._regionErr && !firstRegionErr) firstRegionErr = q._regionErr;
           }
@@ -697,7 +756,6 @@ const parseTemplate = () => {
   else if (firstRegionErr) highlightError(firstRegionErr.start, firstRegionErr.end, firstRegionErr.msg);
 };
 
-// 1. 通用图片处理：ID -> URL
 const replaceImages = (text) => {
     if (!text) return '';
     return text.replace(/\[img:([^\]]+)\]/g, (match, innerContent) => {
@@ -718,31 +776,33 @@ const replaceImages = (text) => {
     });
 };
 
-// 2. 安全选项解析：先切分文本，后替换图片
 const safeProcessOptions = (rawLines, layout = 4) => {
     if (!rawLines || rawLines.length === 0) return { options: {}, rows: [] };
     
     let optFullText = rawLines.join('\n');
     const rawOptions = [];
-    const parts = optFullText.split(/([A-Z][.、])/).filter(x=>x && x.trim());
+    
+    const parts = optFullText.split(/([A-Z][.、])/);
     const optionsMap = {};
 
-    for(let i=0; i<parts.length; i+=2) {
-        if(i+1 < parts.length) {
+    for(let i = 0; i < parts.length; i++) {
+        if (parts[i].match(/^[A-Z][.、]$/)) {
             const k = parts[i].replace(/[.、]/, '').trim();
-            let v = parts[i+1].trim();
-            v = replaceImages(v);
-            rawOptions.push({ key: k, value: v });
-            optionsMap[k] = v;
+            if(i + 1 < parts.length) {
+                let v = parts[i+1].trim();
+                v = replaceImages(v);
+                rawOptions.push({ key: k, value: v });
+                optionsMap[k] = v;
+            }
         }
     }
+
     return {
         options: optionsMap,
         rows: distributeOptions(rawOptions, layout)
     };
 };
 
-// 3. 纯正则 HTML 表格转 Markdown 工具函数
 const convertHtmlTableToMarkdown = (text) => {
     if (!text) return '';
     return text.replace(/<table[^>]*>([\s\S]*?)<\/table>/gi, (match, tableContent) => {
@@ -774,7 +834,6 @@ const convertHtmlTableToMarkdown = (text) => {
     });
 };
 
-// 4. 完整的单个块解析逻辑
 const parseSingleChunk = (chunkText, chunkStartOffset = 0) => {
     const lines = chunkText.split('\n');
     const result = {};
@@ -787,7 +846,8 @@ const parseSingleChunk = (chunkText, chunkStartOffset = 0) => {
         optionLayout: 4, options: {}, optionRows: [],
         categoryIds: [], tags: [], showAnswer: true,
         province: '', region: '', _regionErr: null,
-        subQuestions: [] 
+        subQuestions: [],
+        isFavorite: false 
     };
 
     let charCount = 0; 
@@ -813,6 +873,14 @@ const parseSingleChunk = (chunkText, chunkStartOffset = 0) => {
             const moduleName = headerMatch[1];
             const content = headerMatch[2] || '';
             
+            // [重要] ID 处理：确保 ID 被正确解析，否则无法更新
+            if (moduleName === 'ID') {
+                qData.id = content.trim();
+                currentModule = null; 
+                charCount += lineLen;
+                return;
+            }
+
             if (moduleName === '小题') {
                 pushCurrentSubQ();
                 currentSubQ = { 
@@ -914,7 +982,7 @@ const parseSingleChunk = (chunkText, chunkStartOffset = 0) => {
     qData.detailed = replaceImages(qData.detailed);
 
     const kpRaw = getVal('知识点');
-    qData.categoryIds = kpRaw ? kpRaw.split('/').map(n=>props.knowledgeList.find(l=>l.title===n.trim())?.id).filter(x=>x) : [];
+    qData.categoryIds = kpRaw ? kpRaw.split('/').map(n=>props.knowledgeList.find(l=>l.id==id)?.title).filter(x=>x) : [];
     const tagRaw = getVal('标签');
     qData.tags = tagRaw ? tagRaw.split('/').map(t=>t.trim()).filter(x=>x) : [];
 
@@ -938,6 +1006,17 @@ const parseSingleChunk = (chunkText, chunkStartOffset = 0) => {
         qData.optionRows = optResult.rows;
     } else { qData.options = {}; qData.optionRows = []; }
     
+    const split = (s) => s ? String(s).split('/').map(i=>i.trim()).filter(x=>x) : [];
+    qData.yearList = split(qData.year); qData.curYear = qData.yearList[0] || '';
+    qData.sourceList = split(qData.source); qData.curSource = qData.sourceList[0] || '';
+    qData.provList = split(qData.province); qData.curProv = qData.provList[0] || '';
+    qData.numList = split(qData.qNumber); qData.curNum = qData.numList[0] || '';
+    
+    qData.showYearDrop = false;
+    qData.showSourceDrop = false;
+    qData.showProvDrop = false;
+    qData.showNumDrop = false;
+
     return qData;
 };
 
@@ -1061,11 +1140,11 @@ const handleSave = async () => {
           const payload = { ...item, subjectId: props.subjectId, isPublic: props.isPublic };
           delete payload.optionRows; delete payload.showAnswer; 
           delete payload.imgPosCode; delete payload.imgAlign; delete payload.imgId;
-          delete payload._regionErr; delete payload.region; 
+          delete payload._regionErr; delete payload.region; delete payload.isFavorite; 
           
           if (payload.subQuestions) {
               payload.subQuestions.forEach(sq => {
-                  delete sq.optionRows; // 不保存渲染用的 optionRows，只保存 options 数据
+                  delete sq.optionRows; 
                   delete sq.rawOptionLines;
               });
           }
@@ -1092,7 +1171,6 @@ const openOCRModal = () => {
     showOCRModal.value = true; 
     ocrResult.value = ''; 
     ocrLoading.value = false; 
-    // 监听全局粘贴事件，只在 OCR 弹窗打开时生效
     window.addEventListener('paste', handleOCRPaste);
 };
 const closeOCRModal = () => { 
@@ -1100,38 +1178,27 @@ const closeOCRModal = () => {
     window.removeEventListener('paste', handleOCRPaste);
 };
 
-// [核心修改] 支持 File 对象和路径的通用上传函数
-// [替换] 主要是为了适配后端返回的 { content, images } 结构
-// frontend/components/AddQuestionModal.vue
-
 const uploadOCRFile = (fileOrPath) => {
     if (ocrLoading.value) return;
     ocrLoading.value = true;
-    ocrResult.value = ''; // Clear previous result
+    ocrResult.value = ''; 
 
     const formData = new FormData();
     formData.append('model', selectedModel.value);
 
-    // Handle file input (Blob/File or path)
     if (fileOrPath instanceof File || (fileOrPath.raw && fileOrPath.raw instanceof File)) {
          formData.append('file', fileOrPath instanceof File ? fileOrPath : fileOrPath.raw);
     } else if (fileOrPath.blob && fileOrPath.blob instanceof Blob) {
-         // Handle pasted blob
          formData.append('file', fileOrPath.blob, 'pasted_image.png');
     } else {
-        // Fallback for path string (not ideal for XHR but try fetching it first)
-        // In browser environment, we usually get a File object. 
-        // If we only have a path (e.g. from uni.chooseImage), we might need to fetch it to blob first.
-        // For simplicity, assuming we have a File object or Blob here as this is web-focused.
         if (typeof fileOrPath === 'string') {
-             // Try to fetch blob from blob url
              fetch(fileOrPath).then(r => r.blob()).then(blob => {
                  uploadOCRFile({ blob }); 
              }).catch(e => {
                  ocrLoading.value = false;
                  uni.showToast({ title: '文件读取失败', icon: 'none' });
              });
-             return; // Async restart
+             return; 
         }
     }
 
@@ -1163,14 +1230,8 @@ const uploadOCRFile = (fileOrPath) => {
                     } else if (data.t === 'err') {
                         console.error('OCR Stream Error:', data.c);
                         uni.showToast({ title: '识别错误: ' + data.c, icon: 'none' });
-                    } else if (data.t === 'done') {
-                        // Finished
-                    } else if (data.t === 'status') {
-                        // Optional: update status UI
-                        console.log('OCR Status:', data.c);
                     }
                 } catch (e) {
-                    // Ignore incomplete JSON chunks
                 }
             }
         }
@@ -1191,29 +1252,20 @@ const uploadOCRFile = (fileOrPath) => {
     xhr.send(formData);
 };
 
-// [新增] 将识别结果智能插入编辑器
 const insertOCRResult = () => {
     if (!ocrResult.value) return;
-    
-    // 1. 如果编辑器原本是空的，直接赋值；如果已有内容，则换行追加（用分隔符分开）
     if (inputRawText.value && inputRawText.value.trim()) {
-        // 使用您定义的多题分隔符 ===
         inputRawText.value += '\n\n===\n\n' + ocrResult.value;
     } else {
         inputRawText.value = ocrResult.value;
     }
-    
-    // 2. 关闭弹窗
     closeOCRModal();
-    
-    // 3. 稍微延迟后触发“转化”预览，让效果立即可见
     setTimeout(() => {
-        manualParse(); // 调用您原有的解析函数
+        manualParse(); 
         uni.showToast({ title: '已插入并预览', icon: 'success' });
     }, 200);
 };
 
-// [修改] 点击上传：使用 uni.chooseFile，兼容 H5 和小程序
 const chooseOCRFile = () => {
     uni.chooseFile({
         count: 1,
@@ -1221,8 +1273,6 @@ const chooseOCRFile = () => {
         success: (res) => {
             if (res.tempFiles.length > 0) {
                 const file = res.tempFiles[0];
-                // H5端 file 是 File 对象，直接传给 uploadOCRFile
-                // 小程序端 file 是对象包含 path
                 uploadOCRFile(file); 
             }
         },
@@ -1232,14 +1282,12 @@ const chooseOCRFile = () => {
     });
 };
 
-// [修改] 粘贴：放宽类型限制，支持任意文件
 const handleOCRPaste = (e) => {
-    if (!showOCRModal.value) return; // 只有弹窗打开才处理
+    if (!showOCRModal.value) return; 
     const items = e.clipboardData && e.clipboardData.items;
     if (items) {
         for (let i = 0; i < items.length; i++) {
             const item = items[i];
-            // 只要是文件类型 (kind='file') 就尝试上传，不再局限于 type 包含 'image'
             if (item.kind === 'file') {
                 const blob = item.getAsFile();
                 if (blob) {
@@ -1252,7 +1300,6 @@ const handleOCRPaste = (e) => {
     }
 };
 
-// [修改] 拖拽：直接获取 files 并上传
 const handleOCRDrop = (e) => {
     const files = e.dataTransfer.files;
     if (files.length > 0) {
@@ -1307,8 +1354,8 @@ defineExpose({ open });
 .preview-card.active { border-color: #2563eb; box-shadow: 0 0 0 4px rgba(37,99,235,0.1); }
 .mb-4 { margin-bottom: 16px; }
 .q-header { display: flex; justify-content: space-between; font-size: 12px; color: #64748b; margin-bottom: 10px; }
-.meta-left { display: flex; gap: 6px; flex-wrap: wrap; }
-.info-chip { padding: 2px 8px; border-radius: 4px; background: #f1f5f9; color: #64748b; font-size: 11px; display: flex; align-items: center; }
+.meta-left { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.info-chip { padding: 2px 8px; border-radius: 4px; background: #f1f5f9; color: #64748b; font-size: 11px; display: flex; align-items: center; position: relative; }
 .info-chip.type { color: #2563eb; background: #eff6ff; font-weight: bold; }
 .info-chip.diff { color: #f59e0b; background: #fffbeb; }
 .info-chip.err { color: #ef4444; background: #fef2f2; font-weight: bold; }
@@ -1375,6 +1422,20 @@ defineExpose({ open });
 .size-slider { flex: 1; height: 20px; cursor: pointer; }
 .size-val { font-size: 11px; color: #2563eb; font-weight: bold; width: 35px; text-align: right; }
 
+/* 收藏按钮样式 */
+.fav-btn {
+  display: flex; align-items: center; margin-left: 12px; cursor: default; opacity: 0.8;
+}
+.star-icon { width: 16px; height: 16px; display: block; }
+
+/* 下拉框样式 */
+.meta-dropdown-wrap { position: relative; display: inline-block; }
+.meta-dropdown-list { position: absolute; top: 100%; left: 0; background: white; border: 1px solid #e2e8f0; z-index: 99; border-radius: 4px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); min-width: 100%; white-space: nowrap; margin-top: 2px; }
+.meta-dropdown-item { padding: 6px 10px; font-size: 11px; color: #64748b; cursor: pointer; transition: background 0.2s; }
+.meta-dropdown-item:hover { background: #f1f5f9; color: #2563eb; }
+.info-chip.has-more { cursor: pointer; padding-right: 20px; }
+.info-chip.has-more::after { content: '▼'; font-size: 8px; position: absolute; right: 6px; opacity: 0.5; top: 50%; transform: translateY(-50%); }
+
 /* OCR Modal Styles */
 .ocr-body { padding: 20px; height: 500px; display: flex; flex-direction: column; outline: none; }
 .upload-zone {
@@ -1387,7 +1448,8 @@ defineExpose({ open });
 .loading-zone { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; }
 .spinner {
     width: 40px; height: 40px; border: 4px solid #e2e8f0;
-    border-top: 4px solid #2563eb; border-radius: 50%;
+    border-top: 4px solid #2563eb;
+    border-radius: 50%;
     animation: spin 1s linear infinite;
 }
 @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
