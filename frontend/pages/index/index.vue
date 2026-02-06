@@ -1026,8 +1026,18 @@ onUnmounted(() => {
 </script>
 
 <style lang="scss">
-page { height: 100%; overflow: hidden; font-family: "Times New Roman", "SimSun", "Songti SC", serif;}
-.layout-shell { display: flex; width: 100%; height: 100vh; background-color: #ffffff; }
+page { height: 100%; overflow: auto; font-family: "Times New Roman", "SimSun", "Songti SC", serif;}
+.layout-shell { 
+  display: flex; 
+  width: 100%; 
+  height: 100vh; 
+  background-color: #ffffff;
+  
+  /* --- 新增：布局保护 --- */
+  min-width: 1280px;  /* 保证最小宽度，防止侧边栏和内容重叠 (首页内容较多，建议设大一点) */
+  min-height: 600px;  /* 保证最小高度 */
+  overflow: auto;     /* 窗口过小时显示滚动条 */
+}
 
 /* 禁用状态 */
 .tool-btn.disabled { opacity: 0.6; cursor: not-allowed; border-color: #f1f5f9; box-shadow: none; }
@@ -1298,10 +1308,26 @@ page { height: 100%; overflow: hidden; font-family: "Times New Roman", "SimSun",
 .tag { padding: 4px 12px; border: none; background: transparent; cursor: pointer; color: #64748b; position: relative; font-size: 14px; }
 .tag.active { background: transparent; color: #2563eb; font-weight: bold; border: none; }
 .province-grid { display: grid; grid-template-columns: repeat(11, 1fr); gap: 0px 0px; flex: 1; }
-.province-grid .tag { text-align: center; display: flex; justify-content: center; align-items: center; }
-.list-scroll { flex: 1; padding: 12px 0px 12px 12px; box-sizing: border-box; overflow-y: hidden; height: 100%; }
+.province-grid .tag { 
+  text-align: center; 
+  display: flex; 
+  justify-content: center; 
+  align-items: center; 
+  
+  /* --- 新增/修改以下代码 --- */
+  white-space: nowrap; /* 强制不换行 */
+  padding: 4px 2px;    /* 减小左右内边距 (原为 4px 12px) */
+  font-size: 13px;     /* (可选)稍微调小字号以适应更窄的空间 */
+  width: 100%;         /* 确保填满格子 */
+}
 .state-txt { text-align: center; margin-top: 50px; color: #94a3b8; }
 .q-card { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin-bottom: 16px;margin-right: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+
+
+.list-scroll { flex: 1; padding: 12px 0px 12px 12px; box-sizing: border-box; overflow-y: hidden; height: 100%; }
+
+/* 因为 .list-scroll 改为了 flex column center，需要确保 q-card 宽度占满但不超过 max-width */
+
 .q-header { display: flex; justify-content: space-between; font-size: 12px; color: #64748b; margin-bottom: 10px; }
 .meta-left { display: flex; gap: 6px; flex-wrap: wrap; }
 .info-chip { padding: 2px 8px; border-radius: 4px; background: #f1f5f9; color: #64748b; font-size: 11px; display: flex; align-items: center; position: relative; }
@@ -1454,4 +1480,17 @@ page { height: 100%; overflow: hidden; font-family: "Times New Roman", "SimSun",
 .meta-dropdown-item:hover { background: #f1f5f9; color: #2563eb; }
 .info-chip.has-more { cursor: pointer; padding-right: 20px; }
 .info-chip.has-more::after { content: '▼'; font-size: 8px; position: absolute; right: 6px; opacity: 0.5; top: 50%; transform: translateY(-50%); }
+/* --- 全局防挤压补丁 (Index) --- */
+/* 强制这些元素保持原始宽度，不许被 flex 压缩 */
+.app-sidebar, 
+.resource-sidebar-wrapper, 
+.right-toolbar, 
+.header-left-filters,
+.header-right,
+.nav-item, 
+.tool-btn,
+.tag-badge,
+.info-chip {
+    flex-shrink: 0 !important;
+}
 </style>
