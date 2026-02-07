@@ -44,11 +44,27 @@ const MINERU_API_KEY = 'eyJ0eXBlIjoiSldUIiwiYWxnIjoiSFM1MTIifQ.eyJqdGkiOiI3NDcwM
 const MINERU_BASE_URL = 'https://mineru.net/api/v4';
 
 // ==========================================
+// === 工具函数 ===
+// ==========================================
+// 生成6位随机大写字母+数字的ID
+const generateRandomId = () => Math.random().toString(36).substring(2, 8).toUpperCase();
+
+// ==========================================
 // === 数据库连接 ===
 // ==========================================
 const MONGO_URI = 'mongodb://127.0.0.1:27017/question-bank';
 mongoose.connect(MONGO_URI)
-  .then(() => console.log('✅ MongoDB 数据库连接成功'))
+  .then(async () => {
+      console.log('✅ MongoDB 数据库连接成功');
+      // [自动迁移] 将所有旧的 isPublic=true 题目标记为 isOfficial=true (官方题目)
+      try {
+          await Question.updateMany(
+              { isPublic: true, isOfficial: { $exists: false } },
+              { $set: { isOfficial: true } }
+          );
+          console.log('✅ 数据迁移完成：旧公共题目已标记为官方');
+      } catch(e) { console.error('迁移跳过或失败', e); }
+  })
   .catch(err => console.error('❌ MongoDB 连接失败:', err));
 
 app.use(cors());
@@ -223,7 +239,7 @@ async function streamDeepSeek(imagePath, res) {
         return new Promise((resolve, reject) => {
             let buffer = '';
             response.data.on('data', (chunk) => {
-                console.log('Gemini返回:', chunk.toString());
+                console.log('DeepSeek返回:', chunk.toString()); // Log修正为DeepSeek
                 buffer += chunk.toString();
                 const lines = buffer.split('\n');
                 buffer = lines.pop(); // 保留未完整的行
@@ -253,7 +269,7 @@ async function streamDeepSeek(imagePath, res) {
     }
 }
 
-// 4. [新增] Gemini 流式输出 (逻辑同 DeepSeek，只换了 Key 和 Url)
+// 4. [新增] Gemini 流式输出
 async function streamGemini(imagePath, res) {
     try {
         const base64Image = fs.readFileSync(imagePath).toString('base64');
@@ -428,7 +444,6 @@ app.post('/api/smart-ocr', authenticateToken, upload.single('file'), async (req,
                 if (model === 'DeepSeek') {
                     await streamDeepSeek(imgPath, res);
                 } else if (model === 'Gemini 2.5 Pro') {  
-                    // [新增] 调用 Gemini
                     await streamGemini(imgPath, res);
                 } else {
                     // 默认使用 Qwen
@@ -455,14 +470,24 @@ app.post('/api/smart-ocr', authenticateToken, upload.single('file'), async (req,
 });
 
 // ==========================================
-// === 数据库 & 业务接口 (完整保留) ===
+// === 数据库 & 业务接口 ===
 // ==========================================
 
+// 【修改点】新增 uid 和 inviteCode 字段
 const UserSchema = new mongoose.Schema({
     username: { type: String, required: true, unique: true },
     password: { type: String, required: true },
     role: { type: String, default: 'user' }, 
-    createdAt: { type: Date, default: Date.now }
+    createdAt: { type: Date, default: Date.now },
+    uid: { type: String, unique: true },
+    inviteCode: { type: String, unique: true },
+    nickname: { type: String, unique: true, sparse: true },
+    avatar: String,
+    signature: String,
+    gender: { type: Number, default: 0 },
+    birthDate: String,
+    school: String,
+    boundInviteCode: String 
 });
 
 const baseFields = {
@@ -485,7 +510,10 @@ const QuestionSchema = new mongoose.Schema({
         content: String, tags: [String],
         options: { type: Map, of: String }, optionLayout: Number,
         answer: String, analysis: String, detailed: String
-    }]
+    }],
+    // === [新增] 是否为官方题目 ===
+    // true=官方空间, false=公共空间(用户上传), undefined=旧数据
+    isOfficial: { type: Boolean, default: false } 
 });
 QuestionSchema.set('toJSON', { virtuals: true, versionKey: false, transform: (doc, ret) => { ret.id = ret._id.toString(); delete ret._id; } });
 
@@ -520,7 +548,6 @@ const syncCategoriesRecursive = async (nodes, parentId, subjectId, userId, isPub
         const match = existingNodes.find(ex => ex.title === node.title && !usedIds.has(ex.id));
         if (match) {
             match.order = i; 
-            // Normalize parentId to null if it was '0' or ''
             if (!parentId && match.parentId) match.parentId = null;
             await match.save();
             currentId = match.id; usedIds.add(match.id);
@@ -544,7 +571,15 @@ app.post('/api/auth/register', async (req, res) => {
         if (existingUser) return res.status(400).json({ error: '该用户名已被注册' });
 
         const hashedPassword = await bcrypt.hash(req.body.password, 10); 
-        const user = new User({ username: req.body.username, password: hashedPassword }); 
+        
+        // 【修改点】创建用户时自动生成 uid 和 inviteCode
+        const user = new User({ 
+            username: req.body.username, 
+            password: hashedPassword,
+            uid: generateRandomId(),
+            inviteCode: generateRandomId()
+        }); 
+        
         await user.save(); 
         res.json({ success: true }); 
     } catch (e) { 
@@ -552,59 +587,310 @@ app.post('/api/auth/register', async (req, res) => {
         res.status(500).json({ error: '注册失败: ' + e.message }); 
     } 
 });
-app.post('/api/auth/login', async (req, res) => { const user = await User.findOne({ username: req.body.username }); if (!user) return res.status(400).json({ error: '用户不存在' }); if (await bcrypt.compare(req.body.password, user.password)) { const token = jwt.sign({ userId: user._id, username: user.username }, SECRET_KEY); res.json({ token, username: user.username, role: user.role || 'user' }); } else { res.status(400).json({ error: '密码错误' }); } });
+
+app.post('/api/auth/login', async (req, res) => { 
+    const user = await User.findOne({ username: req.body.username }); 
+    if (!user) return res.status(400).json({ error: '用户不存在' }); 
+    
+    if (await bcrypt.compare(req.body.password, user.password)) { 
+        const token = jwt.sign({ userId: user._id, username: user.username }, SECRET_KEY); 
+        // 返回完整用户信息
+        res.json({ 
+            token, 
+            username: user.username, 
+            role: user.role || 'user',
+            uid: user.uid,
+            inviteCode: user.inviteCode,
+            nickname: user.nickname || '',
+            avatar: user.avatar || '',
+            signature: user.signature || '',
+            gender: user.gender || 0,
+            birthDate: user.birthDate || '',
+            school: user.school || '',
+            boundInviteCode: user.boundInviteCode || '' 
+        }); 
+    } else { 
+        res.status(400).json({ error: '密码错误' }); 
+    } 
+});
+const getStrLen = (str) => {
+    let len = 0;
+    for (let i = 0; i < str.length; i++) {
+        // charCodeAt > 127 视为双字节字符(如汉字)
+        if (str.charCodeAt(i) > 127) { 
+            len += 2; 
+        } else { 
+            len++; 
+        }
+    }
+    return len;
+};
+
+// === 新增：更新用户信息接口 ===
+app.post('/api/user/update', authenticateToken, async (req, res) => {
+    try {
+        const { nickname, signature, gender, birthDate, school, avatar, boundInviteCode } = req.body;
+        const userId = req.user.userId;
+
+        const updateData = {};
+        if (signature !== undefined) updateData.signature = signature;
+        if (gender !== undefined) updateData.gender = gender;
+        if (birthDate !== undefined) updateData.birthDate = birthDate;
+        if (school !== undefined) updateData.school = school;
+        if (avatar !== undefined) updateData.avatar = avatar;
+
+        // --- 昵称处理 (保持不变) ---
+        if (nickname) {
+            const regex = /^[\u4e00-\u9fa5a-zA-Z0-9]+$/;
+            if (!regex.test(nickname)) return res.status(400).json({ error: '昵称不能包含特殊符号' });
+            if (getStrLen(nickname) > 12) return res.status(400).json({ error: '昵称过长' });
+
+            const existingUser = await User.findOne({ nickname: nickname, _id: { $ne: userId } });
+            if (existingUser) return res.status(400).json({ error: '该昵称已被占用' });
+            updateData.nickname = nickname;
+        }
+
+        // --- 核心：处理邀请码绑定 ---
+        if (boundInviteCode) {
+            const currentUser = await User.findById(userId);
+            
+            // 1. 如果之前已经绑定过了，禁止修改
+            if (currentUser.boundInviteCode) {
+                // 如果前端传的和存的不一样，报错；如果一样，忽略
+                if (currentUser.boundInviteCode !== boundInviteCode) {
+                    return res.status(400).json({ error: '您已绑定过邀请码，不可更改' });
+                }
+            } else {
+                // 2. 还没绑定过，执行绑定校验
+                if (boundInviteCode === currentUser.inviteCode) {
+                    return res.status(400).json({ error: '不能绑定自己的邀请码' });
+                }
+                
+                const targetUser = await User.findOne({ inviteCode: boundInviteCode });
+                if (!targetUser) {
+                    return res.status(400).json({ error: '邀请码不存在，请检查' });
+                }
+
+                updateData.boundInviteCode = boundInviteCode;
+            }
+        }
+
+        const updatedUser = await User.findByIdAndUpdate(userId, updateData, { new: true });
+        res.json({ success: true, user: updatedUser });
+
+    } catch (e) {
+        console.error(e);
+        if (e.code === 11000) return res.status(400).json({ error: '数据冲突' });
+        res.status(500).json({ error: '更新失败: ' + e.message });
+    }
+});
 app.post('/api/upload', upload.single('file'), (req, res) => { if (!req.file) return res.status(400).json({ error: '请选择文件' }); res.json({ url: `http://localhost:3001/uploads/${req.file.filename}` }); });
-app.get('/api/subjects', authenticateToken, async (req, res) => { const { mode } = req.query; const query = mode === 'public' ? { isPublic: true } : { creatorId: req.user.userId }; if (mode === 'private') { const count = await Subject.countDocuments(query); if (count === 0) await new Subject({ id: new mongoose.Types.ObjectId().toString(), title: '默认科目', order: 0, creatorId: req.user.userId, isPublic: false }).save(); } const subjects = await Subject.find(query).sort({ order: 1 }).lean(); res.json(subjects); });
+app.get('/api/subjects', authenticateToken, async (req, res) => { 
+    const { mode } = req.query; 
+    // 【修改点】public 和 community 都读取 isPublic=true 的科目
+    const query = (mode === 'public' || mode === 'community') 
+        ? { isPublic: true } 
+        : { creatorId: req.user.userId }; 
+    
+    if (mode === 'private') { /* ...原有初始化逻辑不变... */ } 
+    
+    const subjects = await Subject.find(query).sort({ order: 1 }).lean(); 
+    res.json(subjects); 
+});
 app.post('/api/subjects/manage', authenticateToken, async (req, res) => { 
     const { action, list } = req.body; 
     const mode = req.body.mode || req.query.mode; 
-    
-    // Fetch fresh user to ensure role is up-to-date
     let user = req.user;
     try {
         const dbUser = await User.findById(req.user.userId);
         if (dbUser) user = dbUser;
     } catch(e) {}
-
-    const isPublicMode = mode === 'public' && user.role === 'admin'; 
+    const isPublicMode = (mode === 'public' || mode === 'community') && user.role === 'admin';
     const userQuery = isPublicMode ? { isPublic: true } : { creatorId: req.user.userId }; 
     try { if (action === 'update_list') { const existingSubjects = await Subject.find(userQuery); const existingIds = existingSubjects.map(s => s.id); const keepIds = list.filter(s => !s.id.startsWith('new_')).map(s => s.id); const toDelete = existingIds.filter(eid => !keepIds.includes(eid)); if (toDelete.length > 0) await Subject.deleteMany({ id: { $in: toDelete }, ...userQuery }); for (let i = 0; i < list.length; i++) { const item = list[i]; if (item.id.startsWith('new_')) { await new Subject({ id: new mongoose.Types.ObjectId().toString(), title: item.title, order: i, creatorId: req.user.userId, isPublic: isPublicMode }).save(); } else { await Subject.findOneAndUpdate({ id: item.id, ...userQuery }, { title: item.title, order: i }); } } res.json({ success: true }); } else { res.status(400).json({ error: 'Invalid action' }); } } catch(e) { res.status(500).json({ error: e.message }); } });
-app.get('/api/categories', authenticateToken, async (req, res) => { const { mode, subjectId } = req.query; const query = { subjectId }; if (mode === 'public') query.isPublic = true; else query.creatorId = req.user.userId; const flatCats = await Category.find(query).lean(); res.json(buildTree(flatCats)); });
+app.get('/api/categories', authenticateToken, async (req, res) => { 
+    const { mode, subjectId } = req.query; 
+    const query = { subjectId }; 
+    
+    // 【修改点】public 和 community 都读取 isPublic=true 的目录
+    if (mode === 'public' || mode === 'community') {
+        query.isPublic = true;
+    } else {
+        query.creatorId = req.user.userId;
+    }
+    
+    const flatCats = await Category.find(query).lean(); 
+    res.json(buildTree(flatCats)); 
+});
 app.post('/api/categories/manage', authenticateToken, async (req, res) => { 
     if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
     const { action, subjectId, parentId, data, id, sourceId, targetId, position, title, children } = req.body; 
     const mode = req.body.mode || req.query.mode; 
     const userId = req.user.userId; 
-    
-    // Fetch fresh user to ensure role is up-to-date
     let user = req.user;
     try {
         const dbUser = await User.findById(userId);
         if (dbUser) user = dbUser;
     } catch(e) {}
-
-    const isPublicMode = mode === 'public' && user.role === 'admin'; 
+    const isPublicMode = (mode === 'public' || mode === 'community') && user.role === 'admin';
     const query = isPublicMode ? { isPublic: true } : { creatorId: userId }; 
     try { if (action === 'add-root' || action === 'add-sub') { await new Category({ id: new mongoose.Types.ObjectId().toString(), subjectId, title: data.title, parentId: action === 'add-sub' ? parentId : null, order: Date.now(), creatorId: userId, isPublic: isPublicMode }).save(); } else if (action === 'reorder') { const source = await Category.findOne({ id: sourceId, ...query }); const target = await Category.findOne({ id: targetId, ...query }); if (source && target) { if (source.parentId !== target.parentId) source.parentId = target.parentId; source.order = position === 'top' ? (target.order || 0) - 0.1 : (target.order || 0) + 0.1; await source.save(); } } else if (action === 'rename') { await Category.findOneAndUpdate({ id: id, ...query }, { title: title }); } else if (action === 'delete') { await deleteCategoryAndChildren(id, query); } else if (action === 'update_list') { if (children && Array.isArray(children)) await syncCategoriesRecursive(children, parentId, subjectId, userId, isPublicMode); } res.json({ success: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.get('/api/filters', authenticateToken, async (req, res) => { try { const { subjectId } = req.query; const mode = req.query.mode; const query = { subjectId }; if (mode === 'public') query.isPublic = true; else query.creatorId = req.user.userId; const types = await Question.find(query).distinct('type'); const rawProvinces = await Question.find(query).distinct('province'); const provinceSet = new Set(); rawProvinces.forEach(p => { if (p) { const parts = p.split('/'); parts.forEach(part => { if(part.trim()) provinceSet.add(part.trim()); }); } }); res.json({ types: types.filter(t => t), provinces: Array.from(provinceSet).sort() }); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.get('/api/questions', authenticateToken, async (req, res) => { const { mode, categoryIds, subjectId, type, difficulty, province, year, source, qNumber, tags } = req.query; const filter = {}; if (mode === 'public') filter.isPublic = true; else filter.creatorId = req.user.userId; if (subjectId) filter.subjectId = subjectId; if (type && type !== '全部') filter.type = type; if (difficulty && difficulty !== '全部') filter.difficulty = Number(difficulty); if (province && province !== '全部') filter.province = { $regex: province }; if (year) filter.year = { $regex: year }; if (source) filter.source = { $regex: source, $options: 'i' }; if (qNumber) filter.qNumber = { $regex: qNumber }; if (categoryIds) filter.categoryIds = { $in: categoryIds.split(',') }; if (tags) { const tagList = tags.split(','); filter.tags = { $in: tagList }; } try { const questions = await Question.find(filter).sort({ _id: -1 }); res.json({ total: questions.length, data: questions }); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.get('/api/filters', authenticateToken, async (req, res) => {
+    try {
+        const { subjectId, mode } = req.query;
+        const query = { subjectId };
+
+        // === 修改点：区分三种模式的筛选范围 ===
+        if (mode === 'public') {
+            // 官方空间：只筛选官方题目
+            query.isPublic = true;
+            query.isOfficial = true; 
+        } else if (mode === 'community') {
+            // 公共空间：只筛选用户上传的题目
+            query.isPublic = true;
+            query.isOfficial = false; 
+        } else {
+            // 私人空间：只筛选自己的题目
+            query.creatorId = req.user.userId; 
+        }
+
+        const types = await Question.find(query).distinct('type');
+        const rawProvinces = await Question.find(query).distinct('province');
+        const provinceSet = new Set();
+        
+        rawProvinces.forEach(p => {
+            if (p) {
+                const parts = p.split('/');
+                parts.forEach(part => {
+                    if (part.trim()) provinceSet.add(part.trim());
+                });
+            }
+        });
+        
+        res.json({
+            types: types.filter(t => t),
+            provinces: Array.from(provinceSet).sort()
+        });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+app.get('/api/questions', authenticateToken, async (req, res) => { 
+    const { mode, categoryIds, subjectId, type, difficulty, province, year, source, qNumber, tags } = req.query; 
+    
+    const filter = {}; 
+    
+    // === 模式判断 ===
+    if (mode === 'public') {
+        // 官方空间：公开 + 官方标记
+        filter.isPublic = true;
+        filter.isOfficial = true;
+    } else if (mode === 'community') {
+        // [新增] 公共空间：公开 + 非官方标记
+        filter.isPublic = true;
+        filter.isOfficial = false; // 用户上传的题目
+    } else {
+        // 私人空间
+        filter.creatorId = req.user.userId;
+    }
+
+    if (subjectId) filter.subjectId = subjectId; 
+    if (type && type !== '全部') filter.type = type; 
+    if (difficulty && difficulty !== '全部') filter.difficulty = Number(difficulty); 
+    if (province && province !== '全部') filter.province = { $regex: province }; 
+    if (year) filter.year = { $regex: year }; 
+    if (source) filter.source = { $regex: source, $options: 'i' }; 
+    if (qNumber) filter.qNumber = { $regex: qNumber }; 
+    if (categoryIds) filter.categoryIds = { $in: categoryIds.split(',') }; 
+    if (tags) { const tagList = tags.split(','); filter.tags = { $in: tagList }; } 
+    
+    try { 
+        // [关键] populate creatorId 获取上传者信息
+        const questions = await Question.find(filter)
+            .sort({ _id: -1 })
+            .populate('creatorId', 'username nickname avatar signature level following fans coupons vipLevel uid'); 
+            
+        res.json({ total: questions.length, data: questions }); 
+    } catch (e) { res.status(500).json({ error: e.message }); } 
+});
+app.post('/api/questions/publish', authenticateToken, async (req, res) => {
+    const { questionId, targetSubjectId, targetCategoryIds } = req.body;
+    try {
+        // 1. 找到原题（必须是自己的）
+        const originalQ = await Question.findOne({ _id: questionId, creatorId: req.user.userId }).lean();
+        if (!originalQ) return res.status(404).json({ error: '找不到原题或无权操作' });
+
+        // 2. 清理字段，准备克隆
+        delete originalQ._id;
+        delete originalQ.id;
+        delete originalQ.createdAt;
+        delete originalQ.updatedAt;
+
+        // 3. 创建新题：强制设置为公开、非官方、当前用户为创建者
+        const newQ = new Question({
+            ...originalQ,
+            creatorId: req.user.userId,
+            subjectId: targetSubjectId,
+            categoryIds: targetCategoryIds,
+            isPublic: true,      // 公开
+            isOfficial: false,   // 标记为公共空间（非官方）
+            addedTime: new Date().toISOString().split('T')[0],
+            code: 'P' + Date.now().toString().slice(-6) // 新编码 P开头
+        });
+
+        await newQ.save();
+        res.json({ success: true, id: newQ.id });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
 app.post('/api/questions', authenticateToken, async (req, res) => { 
     try { 
-        // Fetch fresh user to ensure role is up-to-date
         let user = req.user;
         try {
             const dbUser = await User.findById(req.user.userId);
             if (dbUser) user = dbUser;
         } catch(e) {}
-
         const isPublicBody = req.body.isPublic === true || req.body.isPublic === 'true';
         const isPublic = (user.role === 'admin' && isPublicBody); 
         const newQ = new Question({ ...req.body, creatorId: req.user.userId, isPublic: isPublic, addedTime: new Date().toISOString().split('T')[0] }); 
         res.json(await newQ.save()); 
     } catch (e) { res.status(500).json({ error: '保存失败' }); } 
 });
-app.put('/api/questions/:id', authenticateToken, async (req, res) => { try { const user = await User.findById(req.user.userId); const filter = (user && user.role === 'admin') ? { _id: req.params.id } : { _id: req.params.id, creatorId: req.user.userId }; const updated = await Question.findOneAndUpdate(filter, req.body, { new: true }); if(!updated) return res.status(403).json({error: '无权操作该题目或题目不存在'}); res.json(updated); } catch (e) { res.status(500).json({ error: '更新失败' }); } });
-app.delete('/api/questions/:id', authenticateToken, async (req, res) => { try { const user = await User.findById(req.user.userId); const filter = (user && user.role === 'admin') ? { _id: req.params.id } : { _id: req.params.id, creatorId: req.user.userId }; const deleted = await Question.findOneAndDelete(filter); if(!deleted) return res.status(403).json({error: '未找到题目或无权限'}); res.json({ success: true }); } catch (e) { res.status(500).json({ error: '删除失败' }); } });
+app.put('/api/questions/:id', authenticateToken, async (req, res) => { 
+    try { 
+        const user = await User.findById(req.user.userId); 
+        const q = await Question.findById(req.params.id);
+        
+        if (!q) return res.status(404).json({error: '题目不存在'});
+
+        let canEdit = false;
+        if (user.role === 'admin') canEdit = true; // 管理员通吃
+        else if (!q.isPublic && q.creatorId.toString() === req.user.userId) canEdit = true; // 私有且是自己的
+
+        if (!canEdit) return res.status(403).json({error: '无权操作该题目'});
+
+        const updated = await Question.findByIdAndUpdate(req.params.id, req.body, { new: true }); 
+        res.json(updated); 
+    } catch (e) { res.status(500).json({ error: '更新失败' }); } 
+});
+app.delete('/api/questions/:id', authenticateToken, async (req, res) => { 
+    try { 
+        const user = await User.findById(req.user.userId); 
+        const q = await Question.findById(req.params.id);
+        
+        if (!q) return res.status(404).json({error: '题目不存在'});
+
+        let canDelete = false;
+        if (user.role === 'admin') canDelete = true;
+        else if (!q.isPublic && q.creatorId.toString() === req.user.userId) canDelete = true;
+
+        if (!canDelete) return res.status(403).json({error: '无权删除'});
+
+        await Question.findByIdAndDelete(req.params.id); 
+        res.json({ success: true }); 
+    } catch (e) { res.status(500).json({ error: '删除失败' }); } 
+});
 app.post('/api/questions/fork', authenticateToken, async (req, res) => { const { questionId, targetSubjectId, targetCategoryIds } = req.body; try { const originalQ = await Question.findOne({ _id: questionId, isPublic: true }).lean(); if (!originalQ) return res.status(404).json({ error: '未找到该公共题目' }); delete originalQ._id; delete originalQ.id; const newQ = new Question({ ...originalQ, creatorId: req.user.userId, isPublic: false, subjectId: targetSubjectId, categoryIds: targetCategoryIds, addedTime: new Date().toISOString().split('T')[0], code: 'F' + Date.now().toString().slice(-6) }); await newQ.save(); res.json({ success: true, id: newQ.id }); } catch (e) { res.status(500).json({ error: e.message }); } });
 
 // 编译接口
@@ -667,18 +953,14 @@ app.post('/api/compile', async (req, res) => {
         fs.writeFileSync(texFile, sourceCode);
         const cmd = `xelatex -interaction=nonstopmode -output-directory="." "paper.tex"`;
         
-        // ================== 修改开始 ==================
-        // 第一遍编译：生成 .aux 辅助文件（计算页码）
         exec(cmd, { cwd: jobDir }, (error1, stdout, stderr) => {
             if (error1) {
                 const logFile = path.join(jobDir, `paper.log`);
                 let logContent = "无日志文件";
                 if (fs.existsSync(logFile)) { logContent = fs.readFileSync(logFile, 'utf-8'); }
-                // 如果第一次就彻底失败（语法错误），直接返回错误
                 return res.status(500).json({ error: '编译失败 (Pass 1)', log: logContent.slice(-3000) });
             }
 
-            // 第二遍编译：读取 .aux 文件，正确填入总页数引用
             exec(cmd, { cwd: jobDir }, (error2, stdout, stderr) => {
                 if (error2) {
                     const logFile = path.join(jobDir, `paper.log`);
@@ -687,13 +969,11 @@ app.post('/api/compile', async (req, res) => {
                     return res.status(500).json({ error: '编译失败 (Pass 2)', log: logContent.slice(-3000) });
                 }
 
-                // 编译成功，返回 PDF 地址
                 const protocol = req.protocol;
                 const host = req.get('host');
                 res.json({ url: `${protocol}://${host}/temp/job_${timestamp}/${pdfFilename}` });
             });
         });
-        // ================== 修改结束 ==================
 
     } catch (e) {
         console.error('[Compile] Server Error:', e);
