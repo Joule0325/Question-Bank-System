@@ -100,7 +100,7 @@
           <view class="resource-sidebar">
             <view class="res-header">
               <view class="subject-wrapper" @click.stop="subjectDropdownOpen = !subjectDropdownOpen">
-                <view class="subject-btn" :class="{ 'public-mode': currentMode === 'public' }">
+                <view class="subject-btn" :class="subjectBtnClass">
                   <text>{{ currentSubjectName }}</text>
                   <image src="/static/icons/三角.svg" class="arrow-icon" mode="aspectFit"></image>
                 </view>
@@ -147,7 +147,10 @@
           <view class="filter-bar">
             <view class="filter-header" @click="isFilterExpanded = !isFilterExpanded">
               <view class="fh-left-group">
-                <text class="fh-title">筛选条件 <text v-if="currentMode==='public'" style="font-weight:normal;color:#94a3b8;margin-left:5px;">(官方库)</text></text>
+                <text class="fh-title">筛选条件 
+                    <text v-if="currentMode==='public'" style="font-weight:normal;color:#94a3b8;margin-left:5px;">(官方库)</text>
+                    <text v-if="currentMode==='community'" style="font-weight:normal;color:#10b981;margin-left:5px;">(公共空间)</text>
+                </text>
                 <view class="clear-filter-btn" v-if="allActiveFilters.length > 0" @click.stop="clearAllFilters">清空标签筛选</view>
               </view>
               <text class="fh-icon">{{ isFilterExpanded ? '▲ 收起' : '▼ 展开' }}</text>
@@ -230,17 +233,29 @@
                       mode="aspectFit"
                     ></image>
                   </view>
+
+                  <view v-if="currentMode === 'community' && q.creatorId" class="uploader-info" 
+                        @mouseenter="handleUserHover($event, q.creatorId)" 
+                        @mouseleave="handleUserLeave">
+                      <image :src="q.creatorId.avatar || ''" class="u-avatar" mode="aspectFill" />
+                      <text class="u-name">{{ q.creatorId.nickname || q.creatorId.username }}</text>
+                  </view>
+
                 </view>
                 <view class="meta-right">
-                  <template v-if="currentMode === 'public'">
+                  <template v-if="currentMode === 'public' || currentMode === 'community'">
                       <block v-if="currentUser && currentUser.role === 'admin'">
                           <text class="op-btn green" @click="openForkModal(q)">+ 加入我的题库</text>
                           <text class="op-btn blue" @click="openEditModal(q)">编辑</text>
                           <text class="op-btn red" @click="handleDelete(q.id)">删除</text>
                       </block>
-                      <text v-else class="op-btn green" @click="openForkModal(q)">+ 加入我的题库</text>
+                      <block v-else>
+                          <text class="op-btn green" @click="openForkModal(q)">+ 加入我的题库</text>
+                      </block>
                   </template>
+                  
                   <template v-else>
+                      <text class="op-btn purple" @click="openPublishModal(q)">⬆ 上传</text>
                       <text class="op-btn blue" @click="openEditModal(q)">编辑</text>
                       <text class="op-btn red" @click="handleDelete(q.id)">删除</text>
                   </template>
@@ -374,12 +389,22 @@
       <view class="empty-content"><text class="empty-icon">🚧</text><text class="empty-text">功能开发中...</text></view>
     </view>
 
+    <UserHoverCard 
+      v-if="hoverUserInfo" 
+      :userInfo="hoverUserInfo" 
+      :top="hoverPos.top" 
+      :left="hoverPos.left"
+      @close="handleUserLeave"
+      @keep="cancelUserLeave"
+    />
+
     <ManageSubjectModal v-model:visible="showSubjectModal" :initialData="subjects" :mode="currentMode" @saved="reloadSubjects" />
     <ManageContentModal v-model:visible="showContentModal" :subjectId="currentSubjectId" :mode="currentMode" @saved="loadCategories" />
-    <AddQuestionModal ref="addModalRef" v-model:visible="showAddModal" :subjectId="currentSubjectId" :knowledgeList="flatLeaves" :isPublic="currentMode === 'public'" @saved="handleQuestionSaved" />
+    <AddQuestionModal ref="addModalRef" v-model:visible="showAddModal" :subjectId="currentSubjectId" :knowledgeList="flatLeaves" :isPublic="currentMode !== 'private'" @saved="handleQuestionSaved" />
     <ExportQuestionsModal v-model:visible="showExportModal" :questions="questionsForExport" />
     <ExportWordModal v-model:visible="showWordExportModal" :questions="questionsForExport" />
     <QuestionBasketModal :isOpen="activeBasketId !== null" :basketId="activeBasketId" :baskets="baskets" :knowledgeList="flatLeaves" @close="activeBasketId = null" @update:basketId="(id) => activeBasketId = id" @remove="(qid) => removeFromBasket(activeBasketId, qid)" @clear="(bid) => baskets[bid] = []" @export-pdf="handleExportPdf" @export-word="handleExportWord" />
+    
     <view class="fork-modal-overlay" v-if="showForkModal" @click="showForkModal=false">
         <view class="fork-modal-box" @click.stop>
             <view class="fm-title">加入我的题库</view>
@@ -387,6 +412,29 @@
             <view class="fm-field"><text class="fm-label">选择科目:</text><picker :range="privateSubjects" range-key="title" @change="handleForkSubChange"><view class="fm-picker">{{ selectedForkSub ? selectedForkSub.title : '请选择...' }}</view></picker></view>
             <view class="fm-field" v-if="selectedForkSub"><text class="fm-label">选择知识点:</text><picker :range="privateCategoriesFlat" range-key="fullPath" @change="handleForkCatChange"><view class="fm-picker">{{ selectedForkCat ? selectedForkCat.fullPath : '请选择...' }}</view></picker></view>
             <view class="fm-actions"><button class="fm-btn cancel" @click="showForkModal=false">取消</button><button class="fm-btn confirm" :disabled="!selectedForkCat" @click="confirmFork">确认克隆</button></view>
+        </view>
+    </view>
+
+    <view class="fork-modal-overlay" v-if="showPublishModal" @click="showPublishModal=false">
+        <view class="fork-modal-box" @click.stop>
+            <view class="fm-title">上传到公共空间</view>
+            <view class="fm-tip">请选择在公共空间中的分类位置：</view>
+            <view class="fm-field">
+                <text class="fm-label">选择科目:</text>
+                <picker :range="publicSubjects" range-key="title" @change="handlePublishSubChange">
+                    <view class="fm-picker">{{ selectedPublishSub ? selectedPublishSub.title : '请选择...' }}</view>
+                </picker>
+            </view>
+            <view class="fm-field" v-if="selectedPublishSub">
+                <text class="fm-label">选择知识点:</text>
+                <picker :range="publicCategoriesFlat" range-key="fullPath" @change="handlePublishCatChange">
+                    <view class="fm-picker">{{ selectedPublishCat ? selectedPublishCat.fullPath : '请选择...' }}</view>
+                </picker>
+            </view>
+            <view class="fm-actions">
+                <button class="fm-btn cancel" @click="showPublishModal=false">取消</button>
+                <button class="fm-btn confirm" :disabled="!selectedPublishCat" @click="confirmPublish">确认上传</button>
+            </view>
         </view>
     </view>
 
@@ -414,7 +462,6 @@
 </template>
 
 <script setup>
-// 👇 加上 nextTick
 import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { request } from '@/utils/request.js';
 import { getQuestions, deleteQuestion } from '@/api/question.js';
@@ -428,6 +475,7 @@ import ManageSubjectModal from '@/components/ManageSubjectModal.vue';
 import ManageContentModal from '@/components/ManageContentModal.vue';
 import QuestionBasketModal from '@/components/QuestionBasketModal.vue';
 import PersonalCenter from '@/components/PersonalCenter.vue';
+import UserHoverCard from '@/components/UserHoverCard.vue'; // 【新增引入】
 import { onLoad } from '@dcloudio/uni-app';
 import { globalConfig, formatOptionLabel, formatSubIndex } from '@/utils/configStore.js';
 
@@ -460,7 +508,8 @@ const provinceOptions = ref([ "全国", "北京", "天津", "上海", "重庆", 
 
 const modeOptions = ref([
   { label: '私人空间', value: 'private' },
-  { label: '官方空间', value: 'public' }
+  { label: '官方空间', value: 'public' },
+  { label: '公共空间', value: 'community' } // 【新增】
 ]);
 
 const catSearch = ref('');
@@ -495,19 +544,36 @@ const privateCategoriesFlat = ref([]);
 const selectedForkSub = ref(null);
 const selectedForkCat = ref(null);
 
+// 【新增】发布到公共空间相关变量
+const showPublishModal = ref(false);
+const publishTargetQuestion = ref(null);
+const publicSubjects = ref([]);
+const publicCategoriesFlat = ref([]);
+const selectedPublishSub = ref(null);
+const selectedPublishCat = ref(null);
+
+// 【新增】悬停卡片变量
+const hoverUserInfo = ref(null);
+const hoverPos = reactive({ top: 0, left: 0 });
+let hoverTimer = null;
+
 const modeDropdownOpen = ref(false);
 const pageSizeDropdownOpen = ref(false);
 
-// 收藏相关
 const favFolders = ref([]);
-const favMap = ref({}); // { questionId: folderId }
+const favMap = ref({});
 const showFavModal = ref(false);
 const currentFavQid = ref(null);
 
-// [新增] 批量选择相关
 const selectedQuestionIds = ref(new Set());
 
-// --- 2. 生命周期 ---
+// 【新增】计算属性：科目按钮颜色
+const subjectBtnClass = computed(() => {
+    if (currentMode.value === 'public') return 'public-mode'; // 蓝
+    if (currentMode.value === 'community') return 'community-mode'; // 绿
+    return ''; // 默认橙
+});
+
 onLoad((options) => {
   if (options.mode === 'public') {
     currentMode.value = 'public';
@@ -527,7 +593,7 @@ onMounted(async () => {
 
   if (token) currentUser.value = user;
   
-  loadFavData(); // 加载收藏数据
+  loadFavData(); 
   await reloadSubjects(); 
   
   window.addEventListener('keydown', handleKeyBasket);
@@ -541,50 +607,9 @@ onUnmounted(() => {
   window.removeEventListener('resize', checkTagsOverflow);
 });
 
-// 收藏相关逻辑
-const loadFavData = () => {
-    const folders = uni.getStorageSync('USER_FAV_FOLDERS');
-    const data = uni.getStorageSync('USER_FAV_DATA');
-    
-    if (folders) favFolders.value = JSON.parse(folders);
-    else {
-        favFolders.value = [{ id: 1, name: '默认收藏夹' }];
-        uni.setStorageSync('USER_FAV_FOLDERS', JSON.stringify(favFolders.value));
-    }
-    
-    if (data) favMap.value = JSON.parse(data);
-    else favMap.value = {};
-};
+// ... (保持原有的收藏、API请求、业务方法逻辑不变，篇幅原因省略部分未改动代码) ...
+// 请务必保留您原有的 loadFavData, isFav, toggleFav, confirmFav, reloadSubjects 等函数
 
-const isFav = (qid) => {
-    return !!favMap.value[qid];
-};
-
-const toggleFav = (q) => {
-    if (isFav(q.id)) {
-        // 取消收藏
-        delete favMap.value[q.id];
-        uni.setStorageSync('USER_FAV_DATA', JSON.stringify(favMap.value));
-        uni.showToast({ title: '已取消收藏', icon: 'none' });
-    } else {
-        // 打开收藏夹选择
-        loadFavData();
-        currentFavQid.value = q.id;
-        showFavModal.value = true;
-    }
-};
-
-const confirmFav = (folderId) => {
-    if (currentFavQid.value) {
-        favMap.value[currentFavQid.value] = folderId;
-        uni.setStorageSync('USER_FAV_DATA', JSON.stringify(favMap.value));
-        uni.showToast({ title: '收藏成功', icon: 'success' });
-        showFavModal.value = false;
-        currentFavQid.value = null;
-    }
-};
-
-// --- 3. API 请求 ---
 const reloadSubjects = async () => {
   try {
     const subData = await request({ 
@@ -602,6 +627,17 @@ const reloadAll = async () => {
   await loadCategories(); 
   await refreshFilters(); 
   await loadQuestions(); 
+};
+
+const selectSubject = async (index) => {
+  // 1. 更新当前选中的索引
+  currentSubjectIdx.value = index;
+  
+  // 2. 关闭下拉菜单
+  subjectDropdownOpen.value = false;
+  
+  // 3. 重新加载对应科目的数据（目录、过滤器、题目）
+  await reloadAll();
 };
 
 const loadCategories = async () => {
@@ -641,7 +677,7 @@ const refreshFilters = async () => {
 const loadQuestions = async () => {
   if (!currentSubjectId.value) return;
   loading.value = true;
-  selectedQuestionIds.value.clear(); // 切换条件时清空选择
+  selectedQuestionIds.value.clear(); 
   
   const params = { subjectId: currentSubjectId.value, mode: currentMode.value };
   
@@ -679,7 +715,6 @@ const loadQuestions = async () => {
           }
       }
 
-      // [新增] 处理多值字段下拉逻辑
       const split = (s) => s ? String(s).split('/').map(i=>i.trim()).filter(x=>x) : [];
       const yearList = split(q.year);
       const sourceList = split(q.source);
@@ -693,7 +728,6 @@ const loadQuestions = async () => {
           code: q.code || 'A' + q.id.toString().substr(-4), 
           imgPosCode, 
           imgAlign,
-          // Dropdown props
           yearList, curYear: yearList[0] || '', showYearDrop: false,
           sourceList, curSource: sourceList[0] || '', showSourceDrop: false,
           provList, curProv: provList[0] || '', showProvDrop: false,
@@ -703,193 +737,136 @@ const loadQuestions = async () => {
   } catch (e) { console.error(e); } finally { loading.value = false; }
 };
 
-// --- 4. 业务方法 ---
-// [新增] 批量选择逻辑
+// ... (保持原有的 handle 方法) ...
 const isSelected = (id) => selectedQuestionIds.value.has(id);
-const toggleSelection = (id) => {
-    if (selectedQuestionIds.value.has(id)) selectedQuestionIds.value.delete(id);
-    else selectedQuestionIds.value.add(id);
-};
+const toggleSelection = (id) => { if (selectedQuestionIds.value.has(id)) selectedQuestionIds.value.delete(id); else selectedQuestionIds.value.add(id); };
+const handleSelectAllPage = () => { const ids = displayedQuestions.value.map(q => q.id); const allSelected = ids.every(id => selectedQuestionIds.value.has(id)); if (allSelected) ids.forEach(id => selectedQuestionIds.value.delete(id)); else ids.forEach(id => selectedQuestionIds.value.add(id)); };
+const handleBulkDelete = () => { if (selectedQuestionIds.value.size === 0) return uni.showToast({title: '请先选择题目', icon: 'none'}); uni.showModal({ content: `确定删除选中的 ${selectedQuestionIds.value.size} 道题目吗？`, success: async (res) => { if (res.confirm) { for (const id of selectedQuestionIds.value) { await deleteQuestion(id); } selectedQuestionIds.value.clear(); loadQuestions(); uni.showToast({title: '删除成功', icon: 'success'}); } } }); };
+const handleBulkEdit = () => { if (selectedQuestionIds.value.size === 0) return uni.showToast({title: '请先选择题目', icon: 'none'}); const selectedQs = questions.value.filter(q => selectedQuestionIds.value.has(q.id)); showAddModal.value = true; addModalRef.value?.open(selectedQs); };
+const switchMode = (mode) => { if(currentMode.value === mode) return; if (mode === 'private' && !uni.getStorageSync('token')) { uni.showToast({ title: '请先登录', icon: 'none' }); uni.navigateTo({ url: '/pages/login/login' }); return; } currentMode.value = mode; currentPage.value = 1; selectedCategoryIds.value = []; reloadSubjects(); };
+const selectMode = (val) => { switchMode(val); modeDropdownOpen.value = false; };
+const selectPageSize = (size) => { itemsPerPage.value = size; currentPage.value = 1; loadQuestions(); pageSizeDropdownOpen.value = false; };
 
-const handleSelectAllPage = () => {
-    const ids = displayedQuestions.value.map(q => q.id);
-    const allSelected = ids.every(id => selectedQuestionIds.value.has(id));
-    if (allSelected) {
-        ids.forEach(id => selectedQuestionIds.value.delete(id));
-    } else {
-        ids.forEach(id => selectedQuestionIds.value.add(id));
-    }
-};
+const openForkModal = async (q) => { if (!uni.getStorageSync('token')) { uni.showToast({ title: '登录后可加入题库', icon: 'none' }); uni.navigateTo({ url: '/pages/login/login' }); return; } forkTargetQuestion.value = q; showForkModal.value = true; selectedForkSub.value = null; selectedForkCat.value = null; const subs = await request({ url: '/api/subjects', method: 'GET', data: { mode: 'private' } }); privateSubjects.value = subs || []; };
+const handleForkSubChange = async (e) => { const idx = e.detail.value; selectedForkSub.value = privateSubjects.value[idx]; const cats = await request({ url: '/api/categories', method: 'GET', data: { subjectId: selectedForkSub.value.id, mode: 'private' } }); const leaves = []; const traverse = (nodes, path) => nodes?.forEach(n => { const currentPath = path ? `${path} / ${n.title}` : n.title; if(!n.children?.length) leaves.push({ ...n, fullPath: currentPath }); else traverse(n.children, currentPath); }); traverse(cats, ''); privateCategoriesFlat.value = leaves; };
+const handleForkCatChange = (e) => { selectedForkCat.value = privateCategoriesFlat.value[e.detail.value]; };
+const confirmFork = async () => { if(!forkTargetQuestion.value || !selectedForkSub.value || !selectedForkCat.value) return; try { await request({ url: '/api/questions/fork', method: 'POST', data: { questionId: forkTargetQuestion.value.id, targetSubjectId: selectedForkSub.value.id, targetCategoryIds: [selectedForkCat.value.id] } }); uni.showToast({ title: '已加入我的题库', icon: 'success' }); showForkModal.value = false; } catch(e) { uni.showToast({ title: '加入失败', icon: 'none' }); } };
 
-const handleBulkDelete = () => {
-    if (selectedQuestionIds.value.size === 0) return uni.showToast({title: '请先选择题目', icon: 'none'});
-    uni.showModal({
-        content: `确定删除选中的 ${selectedQuestionIds.value.size} 道题目吗？`,
-        success: async (res) => {
-            if (res.confirm) {
-                for (const id of selectedQuestionIds.value) {
-                    await deleteQuestion(id);
-                }
-                selectedQuestionIds.value.clear();
-                loadQuestions();
-                uni.showToast({title: '删除成功', icon: 'success'});
-            }
-        }
+// 【新增】发布到公共空间逻辑
+const openPublishModal = async (q) => {
+    publishTargetQuestion.value = q;
+    showPublishModal.value = true;
+    selectedPublishSub.value = null;
+    selectedPublishCat.value = null;
+    
+    // 【修改点】明确请求 community 模式的目录（虽然底层可能和 public 共享，但语义更清晰）
+    const subs = await request({ 
+        url: '/api/subjects', 
+        method: 'GET', 
+        data: { mode: 'community' } // 改为 community
     });
+    publicSubjects.value = subs || [];
 };
 
-const handleBulkEdit = () => {
-    if (selectedQuestionIds.value.size === 0) return uni.showToast({title: '请先选择题目', icon: 'none'});
-    const selectedQs = questions.value.filter(q => selectedQuestionIds.value.has(q.id));
-    showAddModal.value = true;
-    // 传入数组触发批量编辑模式
-    addModalRef.value?.open(selectedQs);
-};
-
-const switchMode = (mode) => {
-  if(currentMode.value === mode) return;
-  if (mode === 'private' && !uni.getStorageSync('token')) {
-    uni.showToast({ title: '请先登录', icon: 'none' });
-    uni.navigateTo({ url: '/pages/login/login' });
-    return;
-  }
-  currentMode.value = mode;
-  currentPage.value = 1;
-  selectedCategoryIds.value = [];
-  reloadSubjects();
-};
-
-const handleModeChange = (e) => {
-  const index = e.detail.value;
-  const selectedMode = modeOptions.value[index].value;
-  switchMode(selectedMode);
-};
-
-const selectMode = (val) => {
-  switchMode(val);
-  modeDropdownOpen.value = false;
-};
-
-const selectPageSize = (size) => {
-  itemsPerPage.value = size;
-  currentPage.value = 1;
-  loadQuestions();
-  pageSizeDropdownOpen.value = false;
-};
-
-const openForkModal = async (q) => {
-  if (!uni.getStorageSync('token')) {
-    uni.showToast({ title: '登录后可加入题库', icon: 'none' });
-    uni.navigateTo({ url: '/pages/login/login' });
-    return;
-  }
-  forkTargetQuestion.value = q;
-  showForkModal.value = true;
-  selectedForkSub.value = null;
-  selectedForkCat.value = null;
-  const subs = await request({ url: '/api/subjects', method: 'GET', data: { mode: 'private' } });
-  privateSubjects.value = subs || [];
-};
-
-const handleForkSubChange = async (e) => {
-  const idx = e.detail.value;
-  selectedForkSub.value = privateSubjects.value[idx];
-  const cats = await request({ url: '/api/categories', method: 'GET', data: { subjectId: selectedForkSub.value.id, mode: 'private' } });
-  const leaves = [];
-  const traverse = (nodes, path) => nodes?.forEach(n => {
+const handlePublishSubChange = async (e) => {
+    const idx = e.detail.value;
+    selectedPublishSub.value = publicSubjects.value[idx];
+    const cats = await request({ 
+        url: '/api/categories', 
+        method: 'GET', 
+        data: { 
+            subjectId: selectedPublishSub.value.id, 
+            mode: 'community' // 改为 community
+        } 
+    });
+    
+    // 拍平目录树
+    const leaves = [];
+    const traverse = (nodes, path) => nodes?.forEach(n => {
       const currentPath = path ? `${path} / ${n.title}` : n.title;
       if(!n.children?.length) leaves.push({ ...n, fullPath: currentPath });
       else traverse(n.children, currentPath);
-  });
-  traverse(cats, '');
-  privateCategoriesFlat.value = leaves;
-};
-
-const handleForkCatChange = (e) => {
-  selectedForkCat.value = privateCategoriesFlat.value[e.detail.value];
-};
-
-const confirmFork = async () => {
-  if(!forkTargetQuestion.value || !selectedForkSub.value || !selectedForkCat.value) return;
-  try {
-    await request({
-      url: '/api/questions/fork',
-      method: 'POST',
-      data: {
-        questionId: forkTargetQuestion.value.id,
-        targetSubjectId: selectedForkSub.value.id,
-        targetCategoryIds: [selectedForkCat.value.id]
-      }
     });
-    uni.showToast({ title: '已加入我的题库', icon: 'success' });
-    showForkModal.value = false;
-  } catch(e) { uni.showToast({ title: '加入失败', icon: 'none' }); }
+    traverse(cats, '');
+    publicCategoriesFlat.value = leaves;
 };
+
+const handlePublishCatChange = (e) => {
+    selectedPublishCat.value = publicCategoriesFlat.value[e.detail.value];
+};
+
+const confirmPublish = async () => {
+    if(!publishTargetQuestion.value || !selectedPublishSub.value || !selectedPublishCat.value) return;
+    try {
+        await request({
+            url: '/api/questions/publish',
+            method: 'POST',
+            data: {
+                questionId: publishTargetQuestion.value.id,
+                targetSubjectId: selectedPublishSub.value.id,
+                targetCategoryIds: [selectedPublishCat.value.id]
+            }
+        });
+        uni.showToast({ title: '上传成功', icon: 'success' });
+        showPublishModal.value = false;
+    } catch(e) {
+        uni.showToast({ title: '上传失败: ' + (e.error || '未知错误'), icon: 'none' });
+    }
+};
+
+// 【新增】用户悬停卡片逻辑
+const handleUserHover = (e, creator) => {
+    if (hoverTimer) clearTimeout(hoverTimer);
+    hoverUserInfo.value = creator;
+    // 计算位置：显示在鼠标右侧或下方
+    hoverPos.top = e.clientY + 10;
+    hoverPos.left = e.clientX + 10;
+    
+    // 简单边界检查，防止溢出屏幕
+    if (hoverPos.left + 280 > window.innerWidth) hoverPos.left = e.clientX - 290;
+    if (hoverPos.top + 300 > window.innerHeight) hoverPos.top = e.clientY - 300;
+};
+
+const handleUserLeave = () => {
+    hoverTimer = setTimeout(() => {
+        hoverUserInfo.value = null;
+    }, 300); // 300ms 延迟，给用户移动到卡片上的时间
+};
+
+const cancelUserLeave = () => {
+    if (hoverTimer) clearTimeout(hoverTimer);
+};
+
+// 收藏相关逻辑
+const loadFavData = () => {
+    const folders = uni.getStorageSync('USER_FAV_FOLDERS');
+    const data = uni.getStorageSync('USER_FAV_DATA');
+    if (folders) favFolders.value = JSON.parse(folders);
+    else { favFolders.value = [{ id: 1, name: '默认收藏夹' }]; uni.setStorageSync('USER_FAV_FOLDERS', JSON.stringify(favFolders.value)); }
+    if (data) favMap.value = JSON.parse(data); else favMap.value = {};
+};
+const isFav = (qid) => !!favMap.value[qid];
+const toggleFav = (q) => { if (isFav(q.id)) { delete favMap.value[q.id]; uni.setStorageSync('USER_FAV_DATA', JSON.stringify(favMap.value)); uni.showToast({ title: '已取消收藏', icon: 'none' }); } else { loadFavData(); currentFavQid.value = q.id; showFavModal.value = true; } };
+const confirmFav = (folderId) => { if (currentFavQid.value) { favMap.value[currentFavQid.value] = folderId; uni.setStorageSync('USER_FAV_DATA', JSON.stringify(favMap.value)); uni.showToast({ title: '收藏成功', icon: 'success' }); showFavModal.value = false; currentFavQid.value = null; } };
 
 const findNode = (nodes, id) => { for(let n of nodes) { if(n.id === id) return n; if(n.children) { const found = findNode(n.children, id); if(found) return found; } } return null; };
 const getAllLeafIds = (nodes) => { let ids = []; nodes.forEach(node => { if (!node.children || node.children.length === 0) ids.push(node.id); else ids = [...ids, ...getAllLeafIds(node.children)]; }); return ids; };
 const debounceLoadQuestions = () => { if (debounceTimer) clearTimeout(debounceTimer); debounceTimer = setTimeout(() => { loadQuestions(); }, 500); };
 const handleCatSearchInput = () => { if (debounceTimer) clearTimeout(debounceTimer); debounceTimer = setTimeout(() => { handleCatSearch(); }, 500); };
-const handleCatSearch = () => { 
-    const keyword = catSearch.value;
-    if(!keyword) return; 
-    const matchedLeaves = flatLeaves.value.filter(l => l.title.includes(keyword));
-    if(matchedLeaves.length) {
-        selectedCategoryIds.value = matchedLeaves.map(l => l.id);
-        loadQuestions();
-    }
-};
+const handleCatSearch = () => { const keyword = catSearch.value; if(!keyword) return; const matchedLeaves = flatLeaves.value.filter(l => l.title.includes(keyword)); if(matchedLeaves.length) { selectedCategoryIds.value = matchedLeaves.map(l => l.id); loadQuestions(); } };
 const handlePageSizeChange = (e) => { itemsPerPage.value = [10,20,50][e.detail.value]; currentPage.value = 1; loadQuestions(); }
-const changePage = (delta) => {
-    const newVal = currentPage.value + delta;
-    if(newVal >= 1 && newVal <= totalPages.value) currentPage.value = newVal;
-};
+const changePage = (delta) => { const newVal = currentPage.value + delta; if(newVal >= 1 && newVal <= totalPages.value) currentPage.value = newVal; };
 const toggleJumpPopover = () => { showJumpPopover.value = !showJumpPopover.value; if(showJumpPopover.value) jumpPageInput.value = ''; };
-const handleJumpConfirm = () => {
-  const p = parseInt(jumpPageInput.value);
-  if (p && p >= 1 && p <= totalPages.value) {
-    currentPage.value = p; loadQuestions(); showJumpPopover.value = false;
-  } else { uni.showToast({title:'页码无效', icon:'none'}); }
-};
+const handleJumpConfirm = () => { const p = parseInt(jumpPageInput.value); if (p && p >= 1 && p <= totalPages.value) { currentPage.value = p; loadQuestions(); showJumpPopover.value = false; } else { uni.showToast({title:'页码无效', icon:'none'}); } };
 const handleTagClick = (tag) => { if(selectedTags.value.includes(tag)) selectedTags.value = selectedTags.value.filter(t => t !== tag); else selectedTags.value.push(tag); };
 const isSubQHighlighted = (subQ) => { if (!selectedTags.value.length || !subQ.tags?.length) return false; return subQ.tags.some(tag => selectedTags.value.includes(tag)); };
-const removeFilter = (item) => {
-    if (item.type === 'cat') selectedCategoryIds.value = selectedCategoryIds.value.filter(id => id !== item.id);
-    else if (item.type === 'tag') selectedTags.value = selectedTags.value.filter(tag => tag !== item.name);
-    else if (item.type === 'province') selectedProvince.value = '全部';
-    else if (item.type === 'year') { filterYear.value = ''; loadQuestions(); }
-    else if (item.type === 'source') { filterSource.value = ''; loadQuestions(); }
-    else if (item.type === 'qnum') { filterQNumber.value = ''; loadQuestions(); }
-};
-const clearAllFilters = () => { 
-    selectedCategoryIds.value = []; selectedTags.value = []; selectedProvince.value = '全部'; filterYear.value = ''; filterSource.value = ''; filterQNumber.value = ''; loadQuestions(); 
-};
-const selectSubject = (index) => { currentSubjectIdx.value = index; subjectDropdownOpen.value = false; reloadAll(); };
+const removeFilter = (item) => { if (item.type === 'cat') selectedCategoryIds.value = selectedCategoryIds.value.filter(id => id !== item.id); else if (item.type === 'tag') selectedTags.value = selectedTags.value.filter(tag => tag !== item.name); else if (item.type === 'province') selectedProvince.value = '全部'; else if (item.type === 'year') { filterYear.value = ''; loadQuestions(); } else if (item.type === 'source') { filterSource.value = ''; loadQuestions(); } else if (item.type === 'qnum') { filterQNumber.value = ''; loadQuestions(); } };
+const clearAllFilters = () => { selectedCategoryIds.value = []; selectedTags.value = []; selectedProvince.value = '全部'; filterYear.value = ''; filterSource.value = ''; filterQNumber.value = ''; loadQuestions(); };
 const openAddModal = () => { showAddModal.value = true; addModalRef.value?.open(); };
 const openEditModal = (q) => { showAddModal.value = true; addModalRef.value?.open(q); };
 const handleDelete = async (id) => { uni.showModal({ content: '确定删除?', success: async (res) => { if(res.confirm) { await deleteQuestion(id); loadQuestions(); } } }); };
-const handleQuestionSaved = async () => { 
-    loading.value = true;
-    questions.value = []; // Force list clear for visual feedback
-    setTimeout(async () => {
-        await refreshFilters(); 
-        await loadQuestions(); 
-    }, 500); // Small delay to ensure backend consistency
-};
-const handleTreeSelect = (e, node) => {
-    const id = node.id;
-    const isLeaf = !node.children || node.children.length === 0;
-    if(isMultiSelect.value) { 
-        if (isLeaf) {
-            let newSelection = [...selectedCategoryIds.value];
-            if(newSelection.includes(id)) newSelection = newSelection.filter(x => x !== id);
-            else newSelection.push(id);
-            selectedCategoryIds.value = newSelection;
-        } else { uni.showToast({title: '不能选择其他级别目录', icon: 'none'}); }
-    } else {
-        selectedCategoryIds.value = (selectedCategoryIds.value.length === 1 && selectedCategoryIds.value[0] === id) ? [] : [id];
-    }
-};
+const handleQuestionSaved = async () => { loading.value = true; questions.value = []; setTimeout(async () => { await refreshFilters(); await loadQuestions(); }, 500); };
+const handleTreeSelect = (e, node) => { const id = node.id; const isLeaf = !node.children || node.children.length === 0; if(isMultiSelect.value) { if (isLeaf) { let newSelection = [...selectedCategoryIds.value]; if(newSelection.includes(id)) newSelection = newSelection.filter(x => x !== id); else newSelection.push(id); selectedCategoryIds.value = newSelection; } else { uni.showToast({title: '不能选择其他级别目录', icon: 'none'}); } } else { selectedCategoryIds.value = (selectedCategoryIds.value.length === 1 && selectedCategoryIds.value[0] === id) ? [] : [id]; } };
 const toggleExpandAll = (expand) => { defaultTreeOpen.value = expand; manageMenuOpen.value = false; };
 const getKnowledgeTags = (ids) => ids.map(id => flatLeaves.value.find(l => l.id === id) || {id, title:id}).filter(x=>x);
 const toggleAnswer = (id) => showAnswerMap.value[id] = !showAnswerMap.value[id];
@@ -898,43 +875,37 @@ const handleKeyBasket = (e) => { if(waitingBasketKey.value && e.key >= '1' && e.
 const removeFromBasket = (bid, qid) => baskets.value[bid] = baskets.value[bid].filter(x => x.id !== qid);
 const handleExportPdf = () => { showExportModal.value = true; };
 const handleExportWord = () => { showWordExportModal.value = true; };
-const handleGlobalClick = (e) => { 
-  manageMenuOpen.value = false; 
-  subjectDropdownOpen.value = false; 
-  showJumpPopover.value = false;
-  modeDropdownOpen.value = false; 
-  pageSizeDropdownOpen.value = false;
-};
+const handleGlobalClick = (e) => { manageMenuOpen.value = false; subjectDropdownOpen.value = false; showJumpPopover.value = false; modeDropdownOpen.value = false; pageSizeDropdownOpen.value = false; };
 
 // --- 5. Watchers & Computed ---
-watch([selectedType, selectedDiff, selectedProvince, selectedCategoryIds, selectedTags], () => {
-    currentPage.value = 1;
-    loadQuestions();
-});
+watch([selectedType, selectedDiff, selectedProvince, selectedCategoryIds, selectedTags], () => { currentPage.value = 1; loadQuestions(); });
 
 const currentSubjectName = computed(() => subjects.value[currentSubjectIdx.value]?.title || '加载中');
 const currentSubjectId = computed(() => subjects.value[currentSubjectIdx.value]?.id);
-const canEdit = computed(() => currentMode.value === 'private' || (currentMode.value === 'public' && currentUser.value && currentUser.value.role === 'admin'));
+const canEdit = computed(() => {
+    // 1. 私人空间：永远可编辑
+    if (currentMode.value === 'private') return true;
+    
+    // 2. 官方空间 OR 公共空间：只有管理员可编辑
+    if ((currentMode.value === 'public' || currentMode.value === 'community') && 
+        currentUser.value && 
+        currentUser.value.role === 'admin') {
+        return true;
+    }
+    
+    return false;
+});
 const totalPages = computed(() => Math.ceil(questions.value.length / itemsPerPage.value));
 const displayedQuestions = computed(() => questions.value.slice((currentPage.value-1)*itemsPerPage.value, currentPage.value*itemsPerPage.value));
 const provinceOptionsWithAll = computed(() => ['全部', ...provinceOptions.value]);
 const questionsForExport = computed(() => activeBasketId.value && baskets.value[activeBasketId.value] ? baskets.value[activeBasketId.value] : []);
 
-const currentModeLabel = computed(() => {
-  const mode = modeOptions.value.find(m => m.value === currentMode.value);
-  return mode ? mode.label : '私人空间';
-});
-
-const currentModeIndex = computed(() => {
-    return modeOptions.value.findIndex(m => m.value === currentMode.value);
-});
+const currentModeLabel = computed(() => { const mode = modeOptions.value.find(m => m.value === currentMode.value); return mode ? mode.label : '私人空间'; });
+const currentModeIndex = computed(() => { return modeOptions.value.findIndex(m => m.value === currentMode.value); });
 
 const allActiveFilters = computed(() => {
   const list = [];
-  selectedCategoryIds.value.forEach(id => {
-      const n = findNode(categories.value, id);
-      if(n && (!n.children || n.children.length === 0)) list.push({ type: 'cat', id: id, name: n.title }); 
-  });
+  selectedCategoryIds.value.forEach(id => { const n = findNode(categories.value, id); if(n && (!n.children || n.children.length === 0)) list.push({ type: 'cat', id: id, name: n.title }); });
   selectedTags.value.forEach(tag => { list.push({ type: 'tag', id: tag, name: tag }); });
   if(selectedProvince.value !== '全部') list.push({ type: 'province', id: 'prov', name: selectedProvince.value });
   if(selectedType.value !== '全部') list.push({ type: 'type', id: 'type', name: selectedType.value });
@@ -946,97 +917,85 @@ const allActiveFilters = computed(() => {
 });
 
 const visiblePages = computed(() => {
-  const total = totalPages.value || 1;
-  const current = currentPage.value;
-  const maxVisible = 5;
+  const total = totalPages.value || 1; const current = currentPage.value; const maxVisible = 5;
   if (total <= maxVisible) return Array.from({length: total}, (_, i) => ({ val: i + 1, key: 'p-'+(i+1), isActive: i+1 === current }));
-  let start = current - 2;
-  if (start < 1) start = 1;
-  if (start + 4 > total) start = total - 4; 
-  const arr = [];
-  for(let i = 0; i < 5; i++) {
-    const p = start + i;
-    arr.push({ val: p, key: 'slot-' + i, isActive: p === current });
-  }
+  let start = current - 2; if (start < 1) start = 1; if (start + 4 > total) start = total - 4; 
+  const arr = []; for(let i = 0; i < 5; i++) { const p = start + i; arr.push({ val: p, key: 'slot-' + i, isActive: p === current }); }
   return arr;
 });
 
-const dynamicFontStyle = computed(() => {
-  return {
-    fontSize: `${globalConfig.fontSize}px`,
-    lineHeight: globalConfig.lineHeight
-  };
-});
+const dynamicFontStyle = computed(() => { return { fontSize: `${globalConfig.fontSize}px`, lineHeight: globalConfig.lineHeight }; });
 
 // [核心修复] 使用 ID 定位滚动的元素
 const scrollTags = (qid, direction) => {
-    // 假设是 H5 环境，直接用 document 获取
     const el = document.getElementById('tags-row-' + qid);
-    if (el) {
-        el.scrollBy({
-            left: direction * 100, 
-            behavior: 'smooth'
-        });
-    }
+    if (el) { el.scrollBy({ left: direction * 100, behavior: 'smooth' }); }
 };
 
-// [新增] 存储每个题目是否需要显示滑动按钮的状态 { id: true/false }
 const tagsOverflowMap = ref({});
-
 const checkTagsOverflow = () => {
-    // 延时确保 DOM 渲染完成
     setTimeout(() => {
-        const newMap = {}; // 1. 创建一个新对象
-        
+        const newMap = {}; 
         displayedQuestions.value.forEach(q => {
             const el = document.getElementById('tags-row-' + q.id);
             if (el) {
-                // 2. 判定逻辑
                 const isOverflow = el.scrollWidth > el.clientWidth;
                 newMap[q.id] = isOverflow;
-                
-                // 调试用，确认计算结果（如果已解决可删除）
-                // console.log(`题${q.id}: 内容${el.scrollWidth} > 可视${el.clientWidth} ? ${isOverflow}`);
             }
         });
-        
-        // 3. 【关键】整体替换，强制通知 Vue 重新渲染模板中的 v-if
         tagsOverflowMap.value = newMap;
     }, 300);
 };
 
-// [修改] 监听逻辑
-watch(() => displayedQuestions.value, () => {
-    // 数据变化后，先给足够时间让 v-for 渲染
-    nextTick(() => {
-        checkTagsOverflow();
-    });
-}, { immediate: true, deep: true });
+watch(() => displayedQuestions.value, () => { nextTick(() => { checkTagsOverflow(); }); }, { immediate: true, deep: true });
 
-// [新增] 窗口大小改变时重新计算
-onMounted(() => {
-    window.addEventListener('resize', checkTagsOverflow);
-    // 页面加载后额外触发一次，防止字体加载延迟
-    setTimeout(checkTagsOverflow, 1000); 
-});
-
-onUnmounted(() => {
-    window.removeEventListener('resize', checkTagsOverflow);
-});
+onMounted(() => { window.addEventListener('resize', checkTagsOverflow); setTimeout(checkTagsOverflow, 1000); });
+onUnmounted(() => { window.removeEventListener('resize', checkTagsOverflow); });
 </script>
 
 <style lang="scss">
+/* 增加 Community 模式的颜色 */
+.subject-btn.community-mode { background: #10b981; box-shadow: 0 0px 6px rgba(16, 185, 129, 0.5); }
+.op-btn.purple { color: #8b5cf6; }
+
+/* 上传者信息样式 */
+.uploader-info {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: 12px;
+    padding: 2px 6px;
+    background: #f8fafc;
+    border-radius: 12px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all 0.2s;
+}
+.uploader-info:hover {
+    background: #eff6ff;
+    border-color: #dbeafe;
+}
+.u-avatar {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #e2e8f0;
+}
+.u-name {
+    font-size: 11px;
+    color: #64748b;
+    font-weight: 500;
+}
+
 page { height: 100%; overflow: auto; font-family: "Times New Roman", "SimSun", "Songti SC", serif;}
 .layout-shell { 
   display: flex; 
   width: 100%; 
   height: 100vh; 
   background-color: #ffffff;
-  
-  /* --- 新增：布局保护 --- */
-  min-width: 1280px;  /* 保证最小宽度，防止侧边栏和内容重叠 (首页内容较多，建议设大一点) */
-  min-height: 600px;  /* 保证最小高度 */
-  overflow: auto;     /* 窗口过小时显示滚动条 */
+  min-width: 1280px; 
+  min-height: 600px; 
+  overflow: auto; 
 }
 
 /* 禁用状态 */
@@ -1064,8 +1023,6 @@ page { height: 100%; overflow: auto; font-family: "Times New Roman", "SimSun", "
 .fav-btn:active { transform: scale(1.2); }
 .star-icon { width: 16px; height: 16px; display: block; }
 
-/* 删除原来的 .select-btn 样式，添加下面这些 */
-
 .select-icon-btn {
     margin-right: 4px;
 	margin-left: 4px;
@@ -1073,26 +1030,22 @@ page { height: 100%; overflow: auto; font-family: "Times New Roman", "SimSun", "
     display: flex;
     align-items: center;
     justify-content: center;
-    /* 移除原来的边框和背景，纯靠图片展示 */
 }
 
 .sel-icon {
-    width: 26px;  /* 根据你的 svg 实际大小微调，一般 20-24px 合适 */
+    width: 26px; 
     height: 26px;
     display: block;
 }
 
-/* 鼠标悬停时的微互动（可选） */
 .select-icon-btn:hover {
     opacity: 0.8;
 }
 
-/* 批量工具按钮文本 */
 .t-lbl-s { font-size: 11px; margin-top: 4px; line-height: 1; font-weight: 500; color: #475569; }
 .tool-btn.red .t-lbl-s { color: #ef4444; }
 .tool-btn.small { height: 36px; margin-bottom: 8px; }
 
-/* 收藏夹列表样式补全 */
 .fm-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; max-height: 300px; overflow-y: auto; }
 .fm-item { padding: 12px; background: #f8fafc; border-radius: 6px; cursor: pointer; font-size: 14px; color: #334155; border: 1px solid #e2e8f0; transition: all 0.2s; }
 .fm-item:hover { background: #eff6ff; border-color: #2563eb; color: #2563eb; font-weight: bold; }
@@ -1252,14 +1205,14 @@ page { height: 100%; overflow: auto; font-family: "Times New Roman", "SimSun", "
 .pg-total-text { color: #94a3b8; margin: 0 4px; font-size: 13px; }
 .workspace-body { flex: 1; display: flex; overflow: hidden; height: 100%; }
 .resource-sidebar-wrapper { width: 300px; padding: 12px; flex-shrink: 0; display: flex; flex-direction: column; }
-.resource-sidebar { flex: 1; background: #F0F0F0; border-radius: 4px; display: flex; flex-direction: column; overflow: hidden; gap: 15px; padding-top: 15px;}
+.resource-sidebar { flex: 1; background: #F0F0F0; border-radius: 4px; display: flex; flex-direction: column; overflow: visible; gap: 15px; padding-top: 15px;}
 .res-header { padding: 0px 12px; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; border-radius: 4px;}
 .subject-wrapper { position: relative; width: auto; }
 .subject-btn { background:#F87F23; color: white; font-size: 14px; height: 32px; box-sizing: border-box; padding: 0px 14px; width: fit-content; max-width: 160px; display: flex; justify-content: space-between; align-items: center; border-radius: 4px; transition: transform 0.2s cubic-bezier(0.25, 0.1, 0.25, 1), opacity 0.2s cubic-bezier(0.25, 0.1, 0.25, 1), background-color 0.2s; box-shadow: 0 0px 6px rgba(249, 115, 22, 0.5); -webkit-tap-highlight-color: transparent; cursor: pointer; user-select: none; }
 .subject-btn:active { transform: scale(0.96); opacity: 0.85; }
 .subject-btn text:first-child { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; margin-right: 4px; }
 .arrow-icon { width: 12px; height: 12px; margin-left: 4px; flex-shrink: 0; display: block; filter: brightness(0) invert(1); transform: rotate(180deg); position: relative; top: 0.5px; }
-.custom-subject-dropdown { position: absolute; top: 100%; left: 50%;transform: translateX(-50%);width: 100%; background: white; border: 1px ; border-radius: 4px; box-shadow: 0 0px 12px rgba(0, 0, 0, 0.12); z-index: 50; margin-top: 4px; }
+.custom-subject-dropdown { position: absolute; top: 100%; left: 50%;transform: translateX(-50%);width: 100%; background: white; border: 1px solid #e2e8f0; border-radius: 4px; box-shadow: 0 0px 12px rgba(0, 0, 0, 0.12); z-index: 50; margin-top: 4px; }
 .sub-item { padding: 8px 12px; font-size: 13px; cursor: pointer; text-align: center;}
 .sub-item:hover { background: #f8fafc; }
 .sub-item.active { color: #F87F23; font-weight: bold; background: #f87f231A; }
@@ -1473,13 +1426,13 @@ page { height: 100%; overflow: auto; font-family: "Times New Roman", "SimSun", "
 @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
 .mt-2 { margin-top: 8px; }
 
-/* 下拉框样式 */
 .meta-dropdown-wrap { position: relative; display: inline-block; }
 .meta-dropdown-list { position: absolute; top: 100%; left: 0; background: white; border: 1px solid #e2e8f0; z-index: 99; border-radius: 4px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); min-width: 100%; white-space: nowrap; margin-top: 2px; }
 .meta-dropdown-item { padding: 6px 10px; font-size: 11px; color: #64748b; cursor: pointer; transition: background 0.2s; }
 .meta-dropdown-item:hover { background: #f1f5f9; color: #2563eb; }
 .info-chip.has-more { cursor: pointer; padding-right: 20px; }
 .info-chip.has-more::after { content: '▼'; font-size: 8px; position: absolute; right: 6px; opacity: 0.5; top: 50%; transform: translateY(-50%); }
+
 /* --- 全局防挤压补丁 (Index) --- */
 /* 强制这些元素保持原始宽度，不许被 flex 压缩 */
 .app-sidebar, 

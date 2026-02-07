@@ -36,19 +36,19 @@ const handleSubmit = async () => {
             // 保存 Token
             uni.setStorageSync('token', res.token);
             
-            // 【核心修改】：必须保存 role，否则 index.vue 无法识别管理员
+            // === 修改这里：保存完整的用户信息 ===
             uni.setStorageSync('user', { 
                 username: res.username,
-                role: res.role || 'user' // 确保后端传回了 role
+                role: res.role || 'user',
+                uid: res.uid,              // <--- 保存 UID
+                inviteCode: res.inviteCode // <--- 保存 邀请码
             });
+            // =================================
         
             uni.showToast({ title: '欢迎回来', icon: 'success' });
             setTimeout(() => {
-                uni.reLaunch({ url: '/pages/index/index' }); // 建议用 reLaunch 彻底刷新
+                uni.reLaunch({ url: '/pages/index/index' });
             }, 500);
-        } else {
-            uni.showToast({ title: '注册成功，请登录', icon: 'success' });
-            isLogin.value = true;
         }
     } catch(e) {
         uni.showToast({ title: e.error || '请求失败', icon: 'none' });

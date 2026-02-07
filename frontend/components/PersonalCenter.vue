@@ -363,16 +363,37 @@
                 <text class="fix-align">{{ user.uid }}</text>
               </view>
             </view>
-
-            <view class="form-item">
-              <text class="label">邀请码</text>
-              <view class="text-display-box centered">
-                <text class="code-txt fix-align">{{ user.inviteCode }}</text>
-                <text class="copy-text-btn fix-align" @click="copyInviteCode">复制</text>
-              </view>
-            </view>
           </view>
 
+          <view class="form-item">
+            <text class="label">邀请码管理</text>
+            <view class="invite-row-split">
+              
+              <view class="invite-box left">
+                <text class="sub-label">我的邀请码</text>
+                <view class="code-display">
+                  <text class="my-code">{{ user.inviteCode }}</text>
+                  <text class="copy-btn" @click="copyInviteCode">复制</text>
+                </view>
+              </view>
+
+              <view class="invite-box right">
+                <text class="sub-label">绑定邀请码</text>
+                <view class="bind-input-box">
+                  <input 
+                    class="bind-input" 
+                    v-model="editForm.boundInviteCode" 
+                    :disabled="!!user.boundInviteCode" 
+                    :placeholder="user.boundInviteCode ? '已绑定' : '输入他人邀请码'"
+                    maxlength="6"
+                  />
+                  <text v-if="user.boundInviteCode" class="lock-icon">🔒</text>
+                </view>
+              </view>
+
+            </view>
+            <text v-if="user.boundInviteCode" class="bind-tip">已成功绑定: {{ user.boundInviteCode }}</text>
+          </view>
           <view class="form-item">
             <text class="label">我的签名</text>
             <textarea class="textarea-field" v-model="editForm.signature" placeholder="写点什么..." maxlength="100" />
@@ -439,21 +460,6 @@
 
   const userRole = ref('regular');
 
-  // 生成随机邀请码的工具函数
-  const generateInviteCode = () => {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-    let result = '';
-    for (let i = 0; i < 6; i++) {
-      result += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return result;
-  };
-
-  // 生成随机UID的工具函数
-  const generateUid = () => {
-    return Math.floor(Math.random() * 9000) + 1000;
-  }
-
   // 定义默认的初始数据结构
   const defaultUser = {
     nickname: 'Admin',
@@ -469,29 +475,41 @@
     school: '清华大学'
   };
 
-  // 核心用户数据对象
   const user = ref({});
 
-  // 【关键修改】加载或初始化用户信息
+  // 【核心修改 2】修改初始化逻辑，读取真实字段
   const initUserProfile = () => {
-    // 1. 尝试从本地缓存读取用户信息
-    const storedProfile = uni.getStorageSync('USER_PROFILE_DATA');
-
-    if (storedProfile) {
-      // 2. 如果有缓存（说明不是第一次来了），直接使用缓存数据
-      // 这样 UID 和 邀请码 就还是上次那个，不会变
-      user.value = JSON.parse(storedProfile);
-    } else {
-      // 3. 如果没有缓存（说明是新用户第一次打开），生成新的 UID 和 邀请码
+      // 1. 读取【登录接口】存入的真实数据（这里面有后端返回的正确 UID 和 邀请码）
+      const loginInfo = uni.getStorageSync('user') || {}; 
+      
+      // 2. 读取【个人中心】之前保存的缓存（可能包含头像等本地临时修改）
+      let storedProfile = uni.getStorageSync('USER_PROFILE_DATA');
+      let profileData = storedProfile ? JSON.parse(storedProfile) : {};
+  
+      // 3. 合并数据：优先级是 登录真实数据 > 本地缓存 > 默认值
       user.value = {
-        ...defaultUser,
-        uid: generateUid(),           // 生成一次，以后就固定了
-        inviteCode: generateInviteCode() // 生成一次，以后就固定了
+        ...defaultUser,     // 垫底的默认值
+        ...profileData,     // 中间层的本地缓存
+        
+        // === 强制使用登录时的真实数据覆盖 ===
+        username: loginInfo.username, // 用户名
+        nickname: loginInfo.nickname || profileData.nickname || defaultUser.nickname,
+        uid: loginInfo.uid || '未登录',              // 【关键】使用后端返回的真实UID
+        inviteCode: loginInfo.inviteCode || '----',  // 【关键】使用后端返回的真实邀请码
+        role: loginInfo.role,
+        boundInviteCode: loginInfo.boundInviteCode || '', // 绑定的邀请码
+        
+        // 其他字段如果登录时也返回了，最好也加上
+        avatar: loginInfo.avatar || profileData.avatar || '',
+        signature: loginInfo.signature || profileData.signature || '',
+        gender: loginInfo.gender !== undefined ? loginInfo.gender : (profileData.gender || 0),
+        birthDate: loginInfo.birthDate || profileData.birthDate || '2000-01-01',
+        school: loginInfo.school || profileData.school || ''
       };
-      // 4. 立即保存到缓存，确立“身份”
+      
+      // 4. 刷新一下本地缓存，确保持久化
       uni.setStorageSync('USER_PROFILE_DATA', JSON.stringify(user.value));
-    }
-  };
+    };
 
   const config = globalConfig;
 
@@ -507,250 +525,205 @@
   const editVisible = ref(false);
   const editForm = ref({});
 
-  // 打开编辑
   const handleEditInfo = () => {
-    // 深拷贝当前数据到编辑表单
     editForm.value = JSON.parse(JSON.stringify(user.value));
     editVisible.value = true;
   };
 
-  // 关闭编辑
   const handleCloseEdit = () => {
     editVisible.value = false;
   };
 
-  // 更换头像
   const chooseAvatar = () => {
     uni.chooseImage({
       count: 1,
       sizeType: ['compressed'],
       sourceType: ['album', 'camera'],
-      crop: {
-        width: 200,
-        height: 200,
-        resize: true
-      },
-      success: (res) => {
-        // 在编辑模式下只更新预览，不直接改 user
-        editForm.value.avatar = res.tempFilePaths[0];
-      }
+      crop: { width: 200, height: 200, resize: true },
+      success: (res) => { editForm.value.avatar = res.tempFilePaths[0]; }
     });
   };
 
-  // 复制邀请码
   const copyInviteCode = () => {
     uni.setClipboardData({
       data: user.value.inviteCode,
-      success: () => {
-        uni.showToast({
-          title: '邀请码已复制',
-          icon: 'none'
+      success: () => { uni.showToast({ title: '邀请码已复制', icon: 'none' }); }
+    });
+  };
+
+  // 工具函数：计算字符串长度
+  const getStrLen = (str) => {
+    let len = 0;
+    for (let i = 0; i < str.length; i++) {
+      if (str.charCodeAt(i) > 127) len += 2; else len++;
+    }
+    return len;
+  };
+
+  // 【核心修改 3】保存信息 (含头像上传和接口调用)
+  const saveInfo = async () => {
+    const newNick = editForm.value.nickname || '';
+
+    // A. 前端校验
+    if (!newNick.trim()) return uni.showToast({ title: '昵称不能为空', icon: 'none' });
+    if (!/^[\u4e00-\u9fa5a-zA-Z0-9]+$/.test(newNick)) return uni.showToast({ title: '昵称不能含特殊符号', icon: 'none' });
+    if (getStrLen(newNick) > 12) return uni.showToast({ title: '昵称过长', icon: 'none' });
+
+    uni.showLoading({ title: '保存中...' });
+
+    try {
+      // B. 头像上传逻辑
+      let finalAvatarUrl = editForm.value.avatar;
+      const isLocalFile = finalAvatarUrl && (finalAvatarUrl.startsWith('blob:') || finalAvatarUrl.startsWith('file://') || finalAvatarUrl.includes('tmp'));
+
+      if (isLocalFile) {
+        await new Promise((resolve, reject) => {
+          uni.uploadFile({
+            url: 'http://localhost:3001/api/upload', 
+            filePath: finalAvatarUrl,
+            name: 'file',
+            success: (uploadRes) => {
+              const data = JSON.parse(uploadRes.data);
+              if (data.url) { finalAvatarUrl = data.url; resolve(); } 
+              else reject('头像上传失败');
+            },
+            fail: (err) => reject(err)
+          });
         });
       }
-    });
+      editForm.value.avatar = finalAvatarUrl;
+
+      // C. 提交更新到后端
+      const res = await request({
+        url: '/api/user/update',
+        method: 'POST',
+        data: editForm.value
+      });
+
+      uni.hideLoading();
+
+      // D. 更新成功，同步数据
+      if (res.user) {
+          user.value = {
+              ...user.value,
+              ...res.user,
+              nickname: res.user.nickname || user.value.nickname,
+              avatar: res.user.avatar,
+              // 同步所有新字段
+              signature: res.user.signature,
+              gender: res.user.gender,
+              birthDate: res.user.birthDate,
+              school: res.user.school,
+              boundInviteCode: res.user.boundInviteCode
+          };
+      } else {
+          user.value = { ...user.value, ...editForm.value };
+      }
+
+      // E. 更新本地缓存 & 登录缓存
+      uni.setStorageSync('USER_PROFILE_DATA', JSON.stringify(user.value));
+      
+      const loginUser = uni.getStorageSync('user') || {};
+      Object.assign(loginUser, {
+          nickname: user.value.nickname,
+          avatar: user.value.avatar,
+          signature: user.value.signature,
+          gender: user.value.gender,
+          birthDate: user.value.birthDate,
+          school: user.value.school,
+          boundInviteCode: user.value.boundInviteCode
+      });
+      uni.setStorageSync('user', loginUser);
+      
+      uni.showToast({ title: '保存成功', icon: 'success' });
+      return true;
+
+    } catch (e) {
+      uni.hideLoading();
+      uni.showToast({ title: e.error || '保存失败', icon: 'none' });
+      return false;
+    }
   };
 
-  // 【关键修改】保存信息
-  const saveInfo = () => {
-    // 1. 更新内存中的 user 对象
-    user.value = { ...user.value, ...editForm.value };
-    
-    // 2. 【核心】同步写入本地缓存，确保刷新后数据不丢失
-    uni.setStorageSync('USER_PROFILE_DATA', JSON.stringify(user.value));
-    
-    uni.showToast({
-      title: '保存成功',
-      icon: 'success'
-    });
-    return true;
+  const saveAndExit = async () => {
+    const success = await saveInfo();
+    if (success) handleCloseEdit();
   };
 
-  // 保存并退出
-  const saveAndExit = () => {
-    saveInfo();
-    handleCloseEdit();
-  };
-
-  // --- 加载收藏夹数据 ---
   const loadFavData = () => {
     const folders = uni.getStorageSync('USER_FAV_FOLDERS');
     const data = uni.getStorageSync('USER_FAV_DATA');
-
-    if (folders) {
-      favFolders.value = JSON.parse(folders);
-    } else {
-      favFolders.value = [{
-        id: 1,
-        name: '默认收藏夹'
-      }];
+    if (folders) favFolders.value = JSON.parse(folders);
+    else {
+      favFolders.value = [{ id: 1, name: '默认收藏夹' }];
       uni.setStorageSync('USER_FAV_FOLDERS', JSON.stringify(favFolders.value));
     }
-
-    if (!currentFolderId.value && favFolders.value.length > 0) {
-      currentFolderId.value = favFolders.value[0].id;
-    }
-
-    if (data) favMap.value = JSON.parse(data);
-    else favMap.value = {};
-
+    if (!currentFolderId.value && favFolders.value.length > 0) currentFolderId.value = favFolders.value[0].id;
+    if (data) favMap.value = JSON.parse(data); else favMap.value = {};
     loadQuestionsForFolder();
   };
 
-  // --- 新建文件夹 ---
   const createNewFolder = () => {
     uni.showModal({
-      title: '新建收藏夹',
-      editable: true,
-      placeholderText: '请输入文件夹名称',
+      title: '新建收藏夹', editable: true, placeholderText: '请输入文件夹名称',
       success: (res) => {
         if (res.confirm && res.content) {
-          const newId = Date.now();
-          favFolders.value.push({
-            id: newId,
-            name: res.content
-          });
+          favFolders.value.push({ id: Date.now(), name: res.content });
           uni.setStorageSync('USER_FAV_FOLDERS', JSON.stringify(favFolders.value));
         }
       }
     });
   };
 
-  // --- 切换文件夹 ---
-  const selectFolder = (id) => {
-    currentFolderId.value = id;
-    loadQuestionsForFolder();
-  };
+  const selectFolder = (id) => { currentFolderId.value = id; loadQuestionsForFolder(); };
 
-  // --- 获取当前文件夹题目 ---
   const loadQuestionsForFolder = async () => {
     if (!currentFolderId.value) return;
-
     const targetQids = [];
-    for (let qid in favMap.value) {
-      if (favMap.value[qid] === currentFolderId.value) {
-        targetQids.push(qid);
-      }
-    }
-
-    if (targetQids.length === 0) {
-      favQuestions.value = [];
-      return;
-    }
-
+    for (let qid in favMap.value) { if (favMap.value[qid] === currentFolderId.value) targetQids.push(qid); }
+    if (targetQids.length === 0) { favQuestions.value = []; return; }
     try {
       const [resPrivate, resPublic] = await Promise.all([
-        request({
-          url: '/api/questions',
-          method: 'GET',
-          data: {
-            mode: 'private'
-          }
-        }),
-        request({
-          url: '/api/questions',
-          method: 'GET',
-          data: {
-            mode: 'public'
-          }
-        })
+        request({ url: '/api/questions', method: 'GET', data: { mode: 'private' } }),
+        request({ url: '/api/questions', method: 'GET', data: { mode: 'public' } })
       ]);
-
       let allQs = [];
       if (resPrivate && resPrivate.data) allQs = allQs.concat(resPrivate.data);
       if (resPublic && resPublic.data) allQs = allQs.concat(resPublic.data);
-
       const uniqueQs = new Map();
       allQs.forEach(q => uniqueQs.set(q.id, q));
-
-      favQuestions.value = Array.from(uniqueQs.values())
-        .filter(q => targetQids.includes(q.id))
-        .map(processQuestionData);
-
-    } catch (e) {
-      console.error("加载收藏题目失败", e);
-      uni.showToast({
-        title: '加载失败',
-        icon: 'none'
-      });
-    }
+      favQuestions.value = Array.from(uniqueQs.values()).filter(q => targetQids.includes(q.id)).map(processQuestionData);
+    } catch (e) { console.error("加载收藏题目失败", e); uni.showToast({ title: '加载失败', icon: 'none' }); }
   };
 
   const processQuestionData = (q) => {
     let parsedOptions = q.options;
-    if (typeof parsedOptions === 'string') {
-      try {
-        parsedOptions = JSON.parse(parsedOptions);
-      } catch (e) {
-        parsedOptions = {};
-      }
-    }
-
-    return {
-      ...q,
-      options: parsedOptions || {},
-      tags: q.tags || [],
-      code: q.code || 'A' + q.id.toString().substr(-4)
-    };
+    if (typeof parsedOptions === 'string') { try { parsedOptions = JSON.parse(parsedOptions); } catch (e) { parsedOptions = {}; } }
+    return { ...q, options: parsedOptions || {}, tags: q.tags || [], code: q.code || 'A' + q.id.toString().substr(-4) };
   };
 
-  // --- 取消收藏 ---
   const removeFav = (qid) => {
     uni.showModal({
       content: '确定要把这道题移出收藏夹吗？',
       success: (res) => {
-        if (res.confirm) {
-          delete favMap.value[qid];
-          uni.setStorageSync('USER_FAV_DATA', JSON.stringify(favMap.value));
-          loadQuestionsForFolder();
-          uni.showToast({
-            title: '已移除',
-            icon: 'none'
-          });
-        }
+        if (res.confirm) { delete favMap.value[qid]; uni.setStorageSync('USER_FAV_DATA', JSON.stringify(favMap.value)); loadQuestionsForFolder(); uni.showToast({ title: '已移除', icon: 'none' }); }
       }
     });
   };
 
-  const toggleAnswer = (id) => {
-    showAnswerMap.value[id] = !showAnswerMap.value[id];
-  };
+  const toggleAnswer = (id) => { showAnswerMap.value[id] = !showAnswerMap.value[id]; };
 
-  const currentFolderName = computed(() => {
-    const f = favFolders.value.find(x => x.id === currentFolderId.value);
-    return f ? f.name : '收藏夹';
-  });
+  const currentFolderName = computed(() => { const f = favFolders.value.find(x => x.id === currentFolderId.value); return f ? f.name : '收藏夹'; });
 
-  // 【关键修改】在页面加载时，优先初始化用户数据
   onMounted(() => {
-    initUserProfile(); // <-- 初始化用户（读取缓存或生成新用户）
+    initUserProfile();
     loadFavData();
   });
 
-  // 初始化小题默认格式
-  if (!config.subIndexFormat) {
-    config.subIndexFormat = '(1)';
-  }
+  if (!config.subIndexFormat) { config.subIndexFormat = '(1)'; }
 
-  const sampleOpts = {
-    A: '选项A内容，这是一段比较长的文字用来测试换行后的悬挂缩进效果。',
-    B: '选项B内容',
-    C: '选项C内容',
-    D: '选项D内容'
-  };
-  const sampleSubs = [{
-      content: '第一个小题内容。'
-    },
-    {
-      content: '第二个小题内容，带有选项。',
-      options: {
-        A: '小题A选项测试悬挂缩进效果，这里文字要足够长才能看出效果',
-        B: '小题B'
-      }
-    },
-    {
-      content: '第三个小题内容。'
-    }
-  ];
+  const sampleOpts = { A: '选项A内容，这是一段比较长的文字用来测试换行后的悬挂缩进效果。', B: '选项B内容', C: '选项C内容', D: '选项D内容' };
+  const sampleSubs = [{ content: '第一个小题内容。' }, { content: '第二个小题内容，带有选项。', options: { A: '小题A选项测试悬挂缩进效果，这里文字要足够长才能看出效果', B: '小题B' } }, { content: '第三个小题内容。' }];
   const sampleAnswer = 'A';
   const sampleAnalysis = '这里是试题分析内容。为了演示行间距的调整效果，我们需要一段比较长的文字。当您在左侧调整行间距时，这段文字的行与行之间的距离应该会发生相应的变化。';
   const sampleDetailed = '这里是详细解答内容。同样，为了展示字体大小和行间距的实时预览，这段文字也需要足够长。请尝试拖动左侧的滑块，观察这里的排版变化是否符合预期。';
@@ -759,22 +732,10 @@
   const membershipClass = computed(() => `role-${userRole.value}`);
   const expiryDate = computed(() => '2026-12-31');
 
-  const previewStyle = computed(() => ({
-    fontSize: `${config.fontSize}px`,
-    lineHeight: config.lineHeight
-  }));
+  const previewStyle = computed(() => ({ fontSize: `${config.fontSize}px`, lineHeight: config.lineHeight }));
 
-  const saveConfig = () => {
-    persistConfig(config);
-    uni.showToast({
-      title: '配置已保存',
-      icon: 'success'
-    });
-  };
-  const restoreDefault = () => {
-    resetConfig();
-    if (!config.subIndexFormat) config.subIndexFormat = '(1)';
-  };
+  const saveConfig = () => { persistConfig(config); uni.showToast({ title: '配置已保存', icon: 'success' }); };
+  const restoreDefault = () => { resetConfig(); if (!config.subIndexFormat) config.subIndexFormat = '(1)'; };
 </script>
 
 <style lang="scss" scoped>
@@ -787,8 +748,6 @@
     background-color: #f1f5f9;
     display: flex;
     box-sizing: border-box;
-
-    /* --- 防止窗口过小时界面错乱 --- */
     overflow: auto;
     min-width: 1024px;
     min-height: 600px;
@@ -802,7 +761,6 @@
     overflow: hidden;
   }
 
-  /* 左侧导航 */
   .sidebar {
     width: 120px;
     background: #f8fafc;
@@ -832,16 +790,8 @@
     transition: all 0.2s;
     white-space: nowrap;
 
-    &:hover {
-      background: #e2e8f0;
-      color: #334155;
-    }
-
-    &.active {
-      background: #eff6ff;
-      color: #2563eb;
-      font-weight: bold;
-    }
+    &:hover { background: #e2e8f0; color: #334155; }
+    &.active { background: #eff6ff; color: #2563eb; font-weight: bold; }
   }
 
   /* 右侧主内容容器 */
@@ -854,29 +804,23 @@
     background: white;
     min-width: 0;
     width: 0;
-    /* 强制 flex 自适应 */
     height: 100%;
     box-sizing: border-box;
   }
 
-  /* =========================================
-     2. 顶部会员卡片 (Top Row)
-     ========================================= */
+  /* 2. 顶部会员卡片 (Top Row) */
   .top-row {
     display: flex;
     gap: 15px;
-    /* 允许卡片撑开高度，不再固定高度 */
     min-height: 200px;
     flex-shrink: 0;
     min-width: 0;
     width: 100%;
   }
 
-  .info-card,
-  .rights-static-card {
+  .info-card, .rights-static-card {
     flex: 1;
     border-radius: 16px;
-    /* 圆角 */
     border: 1px solid #e2e8f0;
     display: flex;
     flex-direction: column;
@@ -885,20 +829,13 @@
     min-width: 0;
     background: white;
     transition: transform 0.2s;
-
-    &:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 6px 16px rgba(0, 0, 0, 0.06);
-    }
+    &:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0, 0, 0, 0.06); }
   }
 
-  /* --- 重新设计的个人信息卡片 --- */
   .info-card {
     flex: 1.4;
-    /* 个人信息卡片宽度比例 */
     position: relative;
     background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
-    /* 移除固定高度，允许内容撑开 */
   }
 
   .card-bg-decoration {
@@ -912,28 +849,21 @@
     pointer-events: none;
   }
 
-  /* --- 卡片主内容区 --- */
   .card-main-content {
     flex: 1;
     padding: 20px;
     display: flex;
     flex-direction: column;
-    /* 移除 justify-content: space-between，让内容自然排列，高度自适应 */
     justify-content: flex-start;
   }
 
-  /* --- 1. 顶部区域：头像 + 右侧信息 --- */
   .user-header-row {
     display: flex;
     align-items: center;
-    /* [关键] 确保头像和右侧文字垂直居中对齐 */
     gap: 15px;
-    /* 头像和右侧信息的间距 */
     margin-bottom: 12px;
-    /* 与下方签名的间距 */
   }
 
-  /* 头像 */
   .avatar-wrap {
     position: relative;
     width: 64px;
@@ -951,1318 +881,200 @@
     overflow: hidden;
   }
 
-  .real-avatar {
-    width: 100%;
-    height: 100%;
-    border-radius: 50%;
-  }
-
+  .real-avatar { width: 100%; height: 100%; border-radius: 50%; }
   .level-badge {
-    position: absolute;
-    bottom: -2px;
-    right: -4px;
-    background: #f59e0b;
-    color: white;
-    font-size: 9px;
-    padding: 1px 5px;
-    border-radius: 10px;
-    border: 2px solid white;
+    position: absolute; bottom: -2px; right: -4px;
+    background: #f59e0b; color: white;
+    font-size: 9px; padding: 1px 5px;
+    border-radius: 10px; border: 2px solid white;
     font-weight: bold;
   }
 
-  /* 右侧信息块 */
   .header-right {
     display: flex;
     flex-direction: column;
     justify-content: center;
     align-items: flex-start;
-    /* 左对齐 */
     gap: 5px;
-    /* [关键] 用户名行和ID之间的间距设置为 3px */
   }
 
-  /* 用户名行 (用户名 + 编辑按钮) */
-  .name-row {
-    display: flex;
-    align-items: center;
-    /* 垂直居中 */
-    gap: 8px;
-    /* 用户名和编辑按钮之间的间距 */
-  }
-
-  .nickname {
-    font-size: 20px;
-    font-weight: 800;
-    color: #1e293b;
-    line-height: 1.2;
-  }
-
+  .name-row { display: flex; align-items: center; gap: 8px; }
+  .nickname { font-size: 20px; font-weight: 800; color: #1e293b; line-height: 1.2; }
   .edit-btn {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-    background: #f1f5f9;
-    padding: 2px 8px;
-    border-radius: 12px;
-    cursor: pointer;
-    transition: all 0.2s;
-    height: 20px;
-
-    &:hover {
-      background: #e2e8f0;
-    }
+    display: flex; align-items: center; gap: 2px;
+    background: #f1f5f9; padding: 2px 8px;
+    border-radius: 12px; cursor: pointer;
+    transition: all 0.2s; height: 20px;
+    &:hover { background: #e2e8f0; }
   }
+  .edit-btn text { font-size: 10px; color: #64748b; font-weight: bold; }
+  .edit-icon { width: 10px; height: 10px; opacity: 0.6; }
+  .id-tag { font-size: 12px; color: #94a3b8; font-family: monospace; margin-left: 1px; }
 
-  .edit-btn text {
-    font-size: 10px;
-    color: #64748b;
-    font-weight: bold;
-  }
-
-  .edit-icon {
-    width: 10px;
-    height: 10px;
-    opacity: 0.6;
-  }
-
-  /* ID 样式 */
-  .id-tag {
-    font-size: 12px;
-    color: #94a3b8;
-    font-family: monospace;
-    margin-left: 1px;
-    /* 微调左边距，使其视觉上与上方文字对齐 */
-  }
-
-  /* --- 2. 个性签名 (独立一行) --- */
   .signature {
-    font-size: 13px;
-    color: #475569;
-    width: 100%;
-    /* 占满容器宽度，和下方圆角矩形对齐 */
-    line-height: 1.5;
-    /* [关键] 1.5倍行距 */
-    white-space: normal;
-    /* 允许换行 */
-    word-break: break-all;
+    font-size: 13px; color: #475569; width: 100%;
+    line-height: 1.5; white-space: normal; word-break: break-all;
     margin-bottom: 15px;
-    /* 与下方统计条的间距 */
   }
 
-  /* --- 3. 统计条 (圆角矩形) --- */
   .stats-row {
-    display: flex;
-    justify-content: space-around;
-    background: white;
-    border-radius: 12px;
-    padding: 12px 0;
-    border: 1px solid #f1f5f9;
-    width: 100%;
-    /* 宽度占满 */
-    margin-top: auto;
-    /* 如果内容少，推到底部；内容多自然跟随 */
+    display: flex; justify-content: space-around;
+    background: white; border-radius: 12px;
+    padding: 12px 0; border: 1px solid #f1f5f9;
+    width: 100%; margin-top: auto;
   }
-
-  .stat-item {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 2px;
-    cursor: pointer;
-
-    &:hover .stat-num {
-      color: #2563eb;
-    }
-  }
-
-  .stat-num {
-    font-size: 16px;
-    font-weight: 800;
-    color: #334155;
-
-    &.text-gold {
-      color: #d97706;
-    }
-  }
-
-  .stat-label {
-    font-size: 11px;
-    color: #94a3b8;
-  }
-
-  /* 底部：过期条 */
+  .stat-item { display: flex; flex-direction: column; align-items: center; gap: 2px; cursor: pointer; &:hover .stat-num { color: #2563eb; } }
+  .stat-num { font-size: 16px; font-weight: 800; color: #334155; &.text-gold { color: #d97706; } }
+  .stat-label { font-size: 11px; color: #94a3b8; }
+  
   .card-footer-slim {
-    height: 36px;
-    background: rgba(37, 99, 235, 0.05);
+    height: 36px; background: rgba(37, 99, 235, 0.05);
     border-top: 1px solid rgba(37, 99, 235, 0.1);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
+    display: flex; align-items: center; justify-content: space-between;
     padding: 0 20px;
   }
+  .expiry-label { font-size: 11px; color: #64748b; font-weight: 500; }
+  .renew-btn { font-size: 11px; color: #2563eb; font-weight: bold; cursor: pointer; &:hover { text-decoration: underline; } }
 
-  .expiry-label {
-    font-size: 11px;
-    color: #64748b;
-    font-weight: 500;
-  }
-
-  .renew-btn {
-    font-size: 11px;
-    color: #2563eb;
-    font-weight: bold;
-    cursor: pointer;
-
-    &:hover {
-      text-decoration: underline;
-    }
-  }
-
-  /* --- 权益卡片通用 --- */
+  /* 权益卡片 */
   .rights-static-card {
-    .static-header {
-      height: 40px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: bold;
-      font-size: 13px;
-      white-space: nowrap;
-    }
-
-    .static-body {
-      flex: 1;
-      padding: 15px 20px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      justify-content: center;
-    }
-
-    .r-item {
-      font-size: 12px;
-      color: #475569;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .r-item text {
-      font-size: 10px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      width: 14px;
-      height: 14px;
-      border-radius: 50%;
-      background: currentColor;
-      color: white;
-      margin-right: 0;
-    }
-  }
-
-  /* 主题色 */
-  .diamond-theme {
-    .static-header {
-      background: #eff6ff;
-      color: #2563eb;
-    }
-
-    .r-item text {
-      color: #2563eb;
-      background: rgba(37, 99, 235, 0.2);
-    }
-  }
-
-  .blackgold-theme {
-    .static-header {
-      background: #1e293b;
-      color: #fbbf24;
-    }
-
-    .r-item text {
-      color: #d97706;
-      background: rgba(251, 191, 36, 0.2);
-    }
-  }
-
-  .svip-theme {
-    .static-header {
-      background: linear-gradient(135deg, #4f46e5, #7c3aed);
-      color: white;
-    }
-
-    .r-item text {
-      color: #7c3aed;
-      background: rgba(124, 58, 237, 0.2);
-    }
-  }
-
-  /* =========================================
-     3. 配置区布局 (Config Section)
-     ========================================= */
-  .config-section {
-    flex: 1;
-    border: 1px solid #e2e8f0;
-    border-radius: 12px;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    min-height: 0;
-    width: 100%;
-  }
-
-  .section-header {
-    height: 44px;
-    border-bottom: 1px solid #f1f5f9;
-    display: flex;
-    align-items: center;
-    padding: 0 20px;
-    flex-shrink: 0;
-    background: white;
-  }
-
-  .section-title {
-    font-weight: bold;
-    color: #1e293b;
-    font-size: 15px;
-  }
-
-  .config-grid {
-    flex: 1;
-    display: flex;
-    height: 100%;
-    overflow: hidden;
-    width: 100%;
-  }
-
-  /* 左侧表单 (Fixed Width) */
-  .config-form {
-    width: 280px;
-    border-right: 1px solid #e2e8f0;
-    background: white;
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    overflow: hidden;
-    flex-shrink: 0;
-  }
-
-  .form-content {
-    flex: 1;
-    padding: 20px;
-    display: flex;
-    flex-direction: column;
-    gap: 18px;
-    overflow-y: auto;
-  }
-
-  .cfg-item {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .cfg-label {
-    font-size: 12px;
-    font-weight: bold;
-    color: #64748b;
-  }
-
-  .cfg-slider {
-    width: 100%;
-    margin: 0;
-  }
-
-  .radio-group {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-  }
-
-  .radio-btn {
-    padding: 4px 12px;
-    border: 1px solid #e2e8f0;
-    border-radius: 4px;
-    font-size: 12px;
-    color: #64748b;
-    cursor: pointer;
-    background: #fff;
-    transition: all 0.2s;
-
-    &:hover {
-      background: #f8fafc;
-      border-color: #cbd5e1;
-    }
-
-    &.active {
-      background: #2563eb;
-      color: white;
-      border-color: #2563eb;
-    }
-  }
-
-  .btns-row {
-    padding: 15px 20px;
-    border-top: 1px solid #f1f5f9;
-    background: white;
-    display: flex;
-    gap: 10px;
-    margin-top: auto;
-    flex-shrink: 0;
-  }
-
-  .save-btn {
-    flex: 2;
-    background: #2563eb;
-    color: white;
-    font-size: 13px;
-    border-radius: 6px;
-    border: none;
-  }
-
-  .reset-btn {
-    flex: 1;
-    background: #f1f5f9;
-    color: #64748b;
-    font-size: 13px;
-    border-radius: 6px;
-    border: none;
-  }
-
-  /* =========================================
-     4. 右侧预览区 (修复溢出的核心)
-     ========================================= */
-  .preview-wrapper {
-    flex: 1;
-    background: #f1f5f9;
-    position: relative;
-    height: 100%;
-    overflow: hidden;
-    width: 0;
-    min-width: 0;
-  }
-
-  .preview-toolbar {
-    height: 40px;
-    background: white;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 20px;
-    font-size: 12px;
-    color: #64748b;
-    border-bottom: 1px solid #e2e8f0;
-    flex-shrink: 0;
-    white-space: nowrap;
-  }
-
-  .p-tip {
-    color: #94a3b8;
-    font-size: 11px;
-  }
-
-  /* 强制使用绝对定位 */
-  .preview-scroll-view {
-    position: absolute;
-    top: 40px;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    width: 100%;
-    box-sizing: border-box;
-  }
-
-  .cards-container {
-    padding: 20px;
-    display: flex;
-    flex-direction: column;
-    gap: 15px;
-    width: 100%;
-    box-sizing: border-box;
-    /* --- 限制最大宽度并居中 --- */
-    max-width: 1200px;
-    margin: 0 auto;
-  }
-
-  /* =========================================
-     5. 题库卡片样式 (Q-Card)
-     ========================================= */
-  .q-card {
-    background: white;
-    border: 1px solid #e2e8f0;
-    border-radius: 8px;
-    padding: 16px;
-    margin-bottom: 0;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
-    font-family: "Times New Roman", "SimSun", "Songti SC", serif;
-    width: 100%;
-    box-sizing: border-box;
-  }
-
-  .q-header {
-    display: flex;
-    justify-content: space-between;
-    font-size: 12px;
-    color: #64748b;
-    margin-bottom: 12px;
-  }
-
-  .meta-left {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-  }
-
-  .info-chip {
-    padding: 2px 8px;
-    border-radius: 4px;
-    background: #f1f5f9;
-    color: #64748b;
-    font-size: 11px;
-    display: flex;
-    align-items: center;
-    white-space: nowrap;
-
-    &.type {
-      color: #2563eb;
-      background: #eff6ff;
-      font-weight: bold;
-    }
-
-    &.diff {
-      color: #f59e0b;
-      background: #fffbeb;
-    }
-
-    &.prov {
-      background: #f0fdf4;
-      color: #166534;
-    }
-
-    &.year {
-      background: #eef2ff;
-      color: #4338ca;
-    }
-
-    &.num {
-      font-family: monospace;
-    }
-
-    &.source {
-      background: #fff1f2;
-      color: #e11d48;
-    }
-  }
-
-  .q-body {
-    color: #1e293b;
-    cursor: default;
-  }
-
-  .q-title {
-    margin-bottom: 8px;
-    display: flex;
-    align-items: baseline;
-    word-break: break-all;
-    white-space: normal;
-  }
-
-  .q-idx {
-    font-weight: bold;
-    margin-right: 8px;
-    flex-shrink: 0;
-  }
-
-  .opt-list {
-    display: flex;
-    flex-direction: column;
-  }
-
-  .opt-item {
-    display: flex;
-    align-items: baseline;
-  }
-
-  .opt-key {
-    font-weight: bold;
-    margin-right: 8px;
-    flex-shrink: 0;
-    color: #334155;
-  }
-
-  .opt-val {
-    color: #334155;
-    word-break: break-all;
-    flex: 1;
-  }
-
-  /* 小题样式 */
-  .sub-q-list-view {
-    margin-top: 12px;
-    border-top: 1px dashed #e2e8f0;
-    padding-top: 12px;
-  }
-
-  .sub-q-row {
-    margin-bottom: 12px;
-  }
-
-  .sub-q-txt {
-    display: flex;
-    align-items: baseline;
-    margin-bottom: 4px;
-  }
-
-  .sub-idx {
-    font-weight: bold;
-    margin-right: 6px;
-    flex-shrink: 0;
-    color: #334155;
-  }
-
-  .sub-content {
-    flex: 1;
-  }
-
-  .sub-indent {
-    margin-left: 22px;
-    margin-top: 4px;
-  }
-
-  /* Removed margin-left: 24px to allow full width for options */
-
-  /* 答案解析区域 */
-  .mt-2 {
-    margin-top: 12px;
-  }
-
-  .answer-box {
-    background: #f0f9ff;
-    padding: 12px 15px;
-    border-radius: 6px;
-    border: 1px dashed #bae6fd;
-    color: #0c4a6e;
-  }
-
-  .ans-block {
-    margin-bottom: 0.8em;
-    display: flex;
-    align-items: baseline;
-  }
-
-  .ans-block:last-child {
-    margin-bottom: 0;
-  }
-
-  .ans-tag {
-    display: inline-block;
-    padding: 2px 8px;
-    border-radius: 4px;
-    color: white;
-    font-size: 0.9em;
-    font-weight: bold;
-    margin-right: 8px;
-    flex-shrink: 0;
-    line-height: 1.2 !important;
-  }
-
-  .ans-tag.answer {
-    background-color: #2563eb;
-  }
-
-  .ans-tag.analysis {
-    background-color: #f59e0b;
-  }
-
-  .ans-tag.detailed {
-    background-color: #10b981;
-  }
-
-  .ans-content {
-    color: #334155;
-    word-break: break-all;
-  }
-
-  .q-footer {
-    border-top: 1px solid #f1f5f9;
-    margin-top: 12px;
-    padding-top: 8px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-
-  .tags-row {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    flex: 1;
-    flex-wrap: wrap;
-  }
-
-  .tag-badge {
-    font-size: 11px;
-    padding: 2px 6px;
-    border-radius: 4px;
-    display: flex;
-    align-items: center;
-    line-height: 1.2;
-    white-space: nowrap;
-
-    &.red {
-      background: #fef2f2;
-      color: #ef4444;
-      border: 1px solid #fee2e2;
-    }
-
-    &.blue {
-      background: #eff6ff;
-      color: #3b82f6;
-      border: 1px solid #dbeafe;
-    }
-  }
-
-  .tag-icon {
-    width: 12px;
-    height: 12px;
-    margin-right: 4px;
-    display: block;
-  }
-
-  .footer-right {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .hash-code {
-    font-family: monospace;
-    color: #cbd5e1;
-    font-size: 11px;
-  }
-
-  .basket-add-btn-rect {
-    padding: 4px 10px;
-    border-radius: 4px;
-    border: 1px solid #2563eb;
-    color: #2563eb;
-    font-size: 11px;
-    cursor: pointer;
-    transition: all 0.2s;
-    font-weight: 500;
-    background: white;
-    white-space: nowrap;
-
-    &:hover {
-      background: #eff6ff;
-    }
-  }
-
-  /* --- 收藏夹布局 --- */
-  .fav-layout {
-    display: flex;
-    width: 100%;
-    height: 100%;
-    border: 1px solid #e2e8f0;
-    border-radius: 12px;
-    overflow: hidden;
-    background: white;
-    /* 确保 Flex 布局下不溢出 */
-    min-height: 0;
-  }
-
-  /* 1. 收藏夹侧边栏 */
-  .fav-sidebar {
-    width: 220px;
-    border-right: 1px solid #e2e8f0;
-    /* 改用相对定位，作为绝对定位子元素的锚点 */
-    position: relative;
-    background: #f8fafc;
-    flex-shrink: 0;
-    display: block;
-  }
-
-  .fav-header {
-    height: 50px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 15px;
-    border-bottom: 1px solid #e2e8f0;
-    background: white;
-    /* 头部绝对定位或者保留在流中，这里保留在流中即可，但上面的列表需要绝对定位避开它 */
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    z-index: 10;
-    box-sizing: border-box;
-  }
-
-  .fav-title {
-    font-weight: bold;
-    color: #334155;
-    font-size: 14px;
-  }
-
-  .add-folder-btn {
-    width: 24px;
-    height: 24px;
-    border-radius: 4px;
-    background: #eff6ff;
-    color: #2563eb;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 16px;
-    cursor: pointer;
-  }
-
-  /* 侧边栏滚动列表：强制绝对定位 */
-  .folder-list {
-    position: absolute;
-    top: 50px;
-    /* 避开头部高度 */
-    bottom: 0;
-    left: 0;
-    right: 0;
-    padding: 10px;
-    box-sizing: border-box;
-    /* 确保可以滚动 */
-    overflow-y: auto;
-  }
-
-  .folder-item {
-    display: flex;
-    align-items: center;
-    padding: 10px;
-    border-radius: 6px;
-    cursor: pointer;
-    color: #64748b;
-    font-size: 13px;
-    margin-bottom: 4px;
-
-    &:hover {
-      background: #e2e8f0;
-    }
-
-    &.active {
-      background: #eff6ff;
-      color: #2563eb;
-      font-weight: bold;
-    }
-  }
-
-  .f-icon {
-    margin-right: 8px;
-    font-size: 14px;
-  }
-
-  .f-name {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  /* 2. 收藏夹右侧主区域 */
-  .fav-workspace {
-    flex: 1;
-    min-width: 0;
-    background: #f1f5f9;
-    /* 改用相对定位 */
-    position: relative;
-    display: block;
-    /* 覆盖之前的 flex */
-  }
-
-  .fav-top-bar {
-    height: 50px;
-    background: white;
-    border-bottom: 1px solid #e2e8f0;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 20px;
-    /* 头部绝对定位 */
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    z-index: 10;
-    box-sizing: border-box;
-  }
-
-  .ft-title {
-    font-weight: bold;
-    color: #1e293b;
-    font-size: 15px;
-  }
-
-  .ft-desc {
-    font-size: 12px;
-    color: #94a3b8;
-  }
-
-  /* 主区域滚动列表：强制绝对定位 */
-  .fav-scroll-view {
-    position: absolute;
-    top: 50px;
-    /* 避开头部高度 */
-    bottom: 0;
-    left: 0;
-    right: 0;
-    width: 100%;
-    box-sizing: border-box;
-    /* 移除 flex 相关属性 */
-    padding: 0;
-  }
-
-  /* 空状态容器修正 */
-  .empty-fav {
-    height: 100%;
-    width: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #94a3b8;
-    font-size: 14px;
-  }
-
-  /* --- 补充 Index 风格的题目样式 --- */
-  .opt-grid {
-    display: grid;
-    gap: 4px 8px;
-    margin-bottom: 10px;
-    color: #334155;
-  }
-
-  .sub-q-list-view {
-    margin-top: 12px;
-    border-top: 1px dashed #e2e8f0;
-    padding-top: 12px;
-  }
-
-  .sub-q-row {
-    margin-bottom: 12px;
-  }
-
-  .sub-q-txt {
-    display: flex;
-    align-items: baseline;
-    margin-bottom: 4px;
-  }
-
-  .sub-indent {
-    margin-left: 22px;
-    margin-top: 4px;
-  }
-
-  .meta-right {
-    display: flex;
-    align-items: center;
-  }
-
-  .op-btn {
-    font-weight: bold;
-    cursor: pointer;
-    font-size: 11px;
-    margin-left: 10px;
-  }
-
-  .op-btn.red {
-    color: #ef4444;
-  }
-
-  /* --- 全局防挤压补丁 --- */
-  /* 禁止所有图标、标签、按钮、侧边栏被 flex 压缩 */
-  .sidebar,
-  .fav-sidebar,
-  .avatar-wrap,
-  .role-badge,
-  .tag-icon,
-  .f-icon,
-  .info-chip,
-  .tag-badge,
-  .op-btn,
-  .fav-header,
-  .check-icon,
-  .radio-btn {
-    flex-shrink: 0 !important;
-  }
-
-  /* =========================================
-     6. 弹窗样式 (优化版)
-     ========================================= */
-
-  /* --- 1. 弹窗头部 (Header) --- */
-  .custom-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    /* 【关键】垂直居中对齐 */
-    padding: 15px 25px;
-    border-bottom: 1px solid #f1f5f9;
-    background: #fff;
-    flex-shrink: 0;
-    /* 建议给头部一个最小高度，保证视觉舒适 */
-    min-height: 60px;
-    box-sizing: border-box;
-  }
-
-  .modal-title {
-    font-weight: 800;
-    font-size: 15px;
-    color: #0f172a;
-    letter-spacing: -0.5px;
-    /* 【关键】消除文字上下的默认行高间隙，确保绝对垂直居中 */
-    line-height: 1;
-    margin: 0;
-  }
-
-  .header-actions {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-  }
-
-  .h-btn {
-    /* 【关键】强制固定高度，确保所有按钮一样高 */
-    height: 24px;
-    /* 上下内边距设为0，左右保持 */
-    padding: 0 13px;
-    border-radius: 4px;
-    font-size: 13px;
-    cursor: pointer;
-    background: #f1f5f9;
-    color: #64748b;
-    font-weight: 600;
-    /* 使用 Flex 保证文字在固定高度内垂直居中 */
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    /* 显式设置盒模型 */
-    box-sizing: border-box;
-    border: 1px solid transparent;
-
-    &:hover {
-      background: #e2e8f0;
-      transform: translateY(-1px);
-    }
-
-    &:active {
-      transform: translateY(0);
-    }
-
-    &.primary {
-      background: #2563eb;
-      color: white;
-      box-shadow: 0 2px 5px rgba(37, 99, 235, 0.2);
-
-      &:hover {
-        background: #1d4ed8;
-        box-shadow: 0 4px 10px rgba(37, 99, 235, 0.3);
-      }
-    }
-
-    &.outline {
-      background: transparent;
-      border-color: #2563eb;
-      color: #2563eb;
-
-      &:hover {
-        background: #eff6ff;
-        border-color: #1d4ed8;
-        color: #1d4ed8;
-      }
-    }
-  }
-
-  /* --- 2. 内容滚动区 (Body Scroll) --- */
-  .edit-content-scroll {
-    padding: 30px 40px;
-    max-height: 70vh;
-    overflow-y: auto;
-
-    &::-webkit-scrollbar {
-      width: 6px;
-    }
-
-    &::-webkit-scrollbar-track {
-      background: transparent;
-    }
-
-    &::-webkit-scrollbar-thumb {
-      background-color: #cbd5e1;
-      border-radius: 3px;
-
-      &:hover {
-        background-color: #94a3b8;
-      }
-    }
-  }
-
-  /* --- 3. 头像编辑区 (Avatar Section) --- */
-  .avatar-edit-section {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    margin-bottom: 35px;
-  }
-
-  .avatar-edit-wrapper {
-    width: 108px;
-    height: 108px;
-    border-radius: 50%;
-    position: relative;
-    cursor: pointer;
-    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
-    border: 4px solid white;
-    background: #eff6ff;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    overflow: hidden;
-    transition: transform 0.3s;
-
-    &:hover {
-      transform: scale(1.02);
-      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
-    }
-
-    &:hover .camera-mask {
-      opacity: 1;
-    }
-
-    &:hover .avatar-img-preview {
-      transform: scale(1.1);
-    }
-  }
-
-  .avatar-img-preview {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    transition: transform 0.5s ease;
-  }
-
-  .avatar-placeholder-large {
-    font-size: 44px;
-    color: #3b82f6;
-    font-weight: 800;
-  }
-
-  .camera-mask {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: 32px;
-    background: rgba(0, 0, 0, 0.6);
-    backdrop-filter: blur(2px);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    opacity: 0;
-    transition: opacity 0.2s;
-  }
-
-  .cam-icon {
-    width: 18px;
-    height: 18px;
-    filter: brightness(0) invert(1);
-    opacity: 0.9;
-  }
-
-  .tip-text {
-    font-size: 12px;
-    color: #64748b;
-    margin-top: 10px;
-    font-weight: 500;
-  }
-
-  /* --- 4. 表单样式 (Forms) --- */
-  .edit-form-body {
-    display: flex;
-    flex-direction: column;
-    gap: 24px;
-  }
-
-  .form-item {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .label {
-    font-size: 13px;
-    font-weight: 700;
-    color: #334155;
-    display: flex;
-    align-items: center;
-    white-space: nowrap; /* 标签不换行 */
-  }
-
-  /* -----------------------------------
-     1. 输入框样式 (保留边框和背景)
-     -----------------------------------
-  */
-  .input-field,
-  .picker-box,
-  .textarea-field {
-    border: 1px solid #cbd5e1;
-    border-radius: 4px;
-    font-size: 14px;
-    color: #1e293b;
-    background: #fff;
-    transition: all 0.2s;
-    box-sizing: border-box;
-  }
-
-  .input-field,
-  .picker-box {
-    height: 27px;
-    padding: 0 8px;
-    display: flex;
-    align-items: center;
-  }
-
-  .textarea-field {
-    /* [修改] 调整padding以匹配input的左右边距 */
-    padding: 8px 6px 8px 10px;
-    height: 90px;
-    width: 100%;
-    line-height: 1.5;
-  }
-
-  /* 聚焦高亮 */
-  .input-field:focus,
-  .textarea-field:focus {
-    border-color: #2563eb;
-    outline: none;
-    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
-  }
-
-  /* -----------------------------------
-     2. 纯文本展示样式 (无边框，无背景) 
-     适用于 UID 和 邀请码
-     -----------------------------------
-  */
-  .text-display-box {
-    height: 27px; 
-    display: flex;
-    align-items: center; /* 垂直居中 */
-    font-size: 14px;
-    color: #64748b;
-    background: transparent;
-    border: none;
-    padding: 0;
-  }
-
-  .centered {
-    justify-content: center; /* 水平居中 */
-  }
-
-  /* [修改] 去掉之前的所有 top/margin-top 偏移，还原自然对齐 */
-  .fix-align {
-    position: relative; 
-	top: 1px;
-    line-height: 1;
-  }
-
-  /* 2. 邀请码文字 */
-  .code-txt {
-    font-family: "Menlo", "Monaco", monospace;
-    font-weight: 700;
-    letter-spacing: 1px;
-    color: #334155;
-    margin-right: 8px; /* 与复制按钮的间距 */
-  }
-
-  /* 3. 复制按钮 (纯文字) */
-  .copy-text-btn {
-    color: #2563eb;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    white-space: nowrap;
-	
-	/* 【新增】单独微调位置 */
-	  position: relative; /* 确保 top 生效 */
-	  /* 如果之前的 fix-align 是 top: 5px，这里设为 2px 或 1px 就能让它往上跑 */
-	  /* 您可以根据视觉效果微调这个数字，越小越靠上，甚至可以是负数 */
-	  top: 0px;
-    
-    &:hover {
-      text-decoration: underline;
-      color: #1d4ed8;
-    }
-  }
-
-  /* -----------------------------------
-     3. 布局控制
-     -----------------------------------
-  */
-  .form-row-split {
-    display: flex;
-    gap: 10px;
-    align-items: center; /* 垂直对齐 */
-  }
-
-  /* 让每个小项内部水平排列 (标签 左边，内容 右边) */
-  .form-row-split .form-item {
-    flex-direction: row;
-    align-items: center;
-    gap: 8px;
-  }
-
-  /* 输入框/展示区 自动撑开 */
-  .form-row-split .input-field,
-  .form-row-split .text-display-box {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .flex-1 {
-    flex: 1;
-  }
-
-  /* 下拉选择器 */
-  .picker-box {
-    justify-content: space-between;
-    cursor: pointer;
-    &:hover { border-color: #94a3b8; }
-  }
+    .static-header { height: 40px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 13px; white-space: nowrap; }
+    .static-body { flex: 1; padding: 15px 20px; display: flex; flex-direction: column; gap: 8px; justify-content: center; }
+    .r-item { font-size: 12px; color: #475569; display: flex; align-items: center; gap: 8px; }
+    .r-item text { font-size: 10px; display: flex; align-items: center; justify-content: center; width: 14px; height: 14px; border-radius: 50%; background: currentColor; color: white; margin-right: 0; }
+  }
+  .diamond-theme { .static-header { background: #eff6ff; color: #2563eb; } .r-item text { color: #2563eb; background: rgba(37, 99, 235, 0.2); } }
+  .blackgold-theme { .static-header { background: #1e293b; color: #fbbf24; } .r-item text { color: #d97706; background: rgba(251, 191, 36, 0.2); } }
+  .svip-theme { .static-header { background: linear-gradient(135deg, #4f46e5, #7c3aed); color: white; } .r-item text { color: #7c3aed; background: rgba(124, 58, 237, 0.2); } }
+
+  /* 3. 配置区布局 */
+  .config-section { flex: 1; border: 1px solid #e2e8f0; border-radius: 12px; display: flex; flex-direction: column; overflow: hidden; min-height: 0; width: 100%; }
+  .section-header { height: 44px; border-bottom: 1px solid #f1f5f9; display: flex; align-items: center; padding: 0 20px; flex-shrink: 0; background: white; }
+  .section-title { font-weight: bold; color: #1e293b; font-size: 15px; }
+  .config-grid { flex: 1; display: flex; height: 100%; overflow: hidden; width: 100%; }
+  .config-form { width: 280px; border-right: 1px solid #e2e8f0; background: white; display: flex; flex-direction: column; height: 100%; overflow: hidden; flex-shrink: 0; }
+  .form-content { flex: 1; padding: 20px; display: flex; flex-direction: column; gap: 18px; overflow-y: auto; }
+  .cfg-item { display: flex; flex-direction: column; gap: 6px; }
+  .cfg-label { font-size: 12px; font-weight: bold; color: #64748b; }
+  .cfg-slider { width: 100%; margin: 0; }
+  .radio-group { display: flex; gap: 6px; flex-wrap: wrap; }
+  .radio-btn { padding: 4px 12px; border: 1px solid #e2e8f0; border-radius: 4px; font-size: 12px; color: #64748b; cursor: pointer; background: #fff; transition: all 0.2s; &:hover { background: #f8fafc; border-color: #cbd5e1; } &.active { background: #2563eb; color: white; border-color: #2563eb; } }
+  .btns-row { padding: 15px 20px; border-top: 1px solid #f1f5f9; background: white; display: flex; gap: 10px; margin-top: auto; flex-shrink: 0; }
+  .save-btn { flex: 2; background: #2563eb; color: white; font-size: 13px; border-radius: 6px; border: none; }
+  .reset-btn { flex: 1; background: #f1f5f9; color: #64748b; font-size: 13px; border-radius: 6px; border: none; }
+
+  /* 4. 右侧预览区 */
+  .preview-wrapper { flex: 1; background: #f1f5f9; position: relative; height: 100%; overflow: hidden; width: 0; min-width: 0; }
+  .preview-toolbar { height: 40px; background: white; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; font-size: 12px; color: #64748b; border-bottom: 1px solid #e2e8f0; flex-shrink: 0; white-space: nowrap; }
+  .p-tip { color: #94a3b8; font-size: 11px; }
+  .preview-scroll-view { position: absolute; top: 40px; bottom: 0; left: 0; right: 0; width: 100%; box-sizing: border-box; }
+  .cards-container { padding: 20px; display: flex; flex-direction: column; gap: 15px; width: 100%; box-sizing: border-box; max-width: 1200px; margin: 0 auto; }
+
+  /* 5. 题库卡片样式 */
+  .q-card { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin-bottom: 0; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05); font-family: "Times New Roman", "SimSun", "Songti SC", serif; width: 100%; box-sizing: border-box; }
+  .q-header { display: flex; justify-content: space-between; font-size: 12px; color: #64748b; margin-bottom: 12px; }
+  .meta-left { display: flex; gap: 6px; flex-wrap: wrap; }
+  .info-chip { padding: 2px 8px; border-radius: 4px; background: #f1f5f9; color: #64748b; font-size: 11px; display: flex; align-items: center; white-space: nowrap; &.type { color: #2563eb; background: #eff6ff; font-weight: bold; } &.diff { color: #f59e0b; background: #fffbeb; } &.prov { background: #f0fdf4; color: #166534; } &.year { background: #eef2ff; color: #4338ca; } &.num { font-family: monospace; } &.source { background: #fff1f2; color: #e11d48; } }
+  .q-body { color: #1e293b; cursor: default; }
+  .q-title { margin-bottom: 8px; display: flex; align-items: baseline; word-break: break-all; white-space: normal; }
+  .q-idx { font-weight: bold; margin-right: 8px; flex-shrink: 0; }
+  .opt-list { display: flex; flex-direction: column; }
+  .opt-item { display: flex; align-items: baseline; }
+  .opt-key { font-weight: bold; margin-right: 8px; flex-shrink: 0; color: #334155; }
+  .opt-val { color: #334155; word-break: break-all; flex: 1; }
+  .sub-q-list-view { margin-top: 12px; border-top: 1px dashed #e2e8f0; padding-top: 12px; }
+  .sub-q-row { margin-bottom: 12px; }
+  .sub-q-txt { display: flex; align-items: baseline; margin-bottom: 4px; }
+  .sub-idx { font-weight: bold; margin-right: 6px; flex-shrink: 0; color: #334155; }
+  .sub-content { flex: 1; }
+  .sub-indent { margin-left: 22px; margin-top: 4px; }
+  .mt-2 { margin-top: 12px; }
+  .answer-box { background: #f0f9ff; padding: 12px 15px; border-radius: 6px; border: 1px dashed #bae6fd; color: #0c4a6e; }
+  .ans-block { margin-bottom: 0.8em; display: flex; align-items: baseline; }
+  .ans-block:last-child { margin-bottom: 0; }
+  .ans-tag { display: inline-block; padding: 2px 8px; border-radius: 4px; color: white; font-size: 0.9em; font-weight: bold; margin-right: 8px; flex-shrink: 0; line-height: 1.2 !important; }
+  .ans-tag.answer { background-color: #2563eb; }
+  .ans-tag.analysis { background-color: #f59e0b; }
+  .ans-tag.detailed { background-color: #10b981; }
+  .ans-content { color: #334155; word-break: break-all; }
+  .q-footer { border-top: 1px solid #f1f5f9; margin-top: 12px; padding-top: 8px; display: flex; justify-content: space-between; align-items: center; }
+  .tags-row { display: flex; gap: 8px; align-items: center; flex: 1; flex-wrap: wrap; }
+  .tag-badge { font-size: 11px; padding: 2px 6px; border-radius: 4px; display: flex; align-items: center; line-height: 1.2; white-space: nowrap; &.red { background: #fef2f2; color: #ef4444; border: 1px solid #fee2e2; } &.blue { background: #eff6ff; color: #3b82f6; border: 1px solid #dbeafe; } }
+  .tag-icon { width: 12px; height: 12px; margin-right: 4px; display: block; }
+  .footer-right { display: flex; align-items: center; gap: 10px; }
+  .hash-code { font-family: monospace; color: #cbd5e1; font-size: 11px; }
+  .basket-add-btn-rect { padding: 4px 10px; border-radius: 4px; border: 1px solid #2563eb; color: #2563eb; font-size: 11px; cursor: pointer; transition: all 0.2s; font-weight: 500; background: white; white-space: nowrap; &:hover { background: #eff6ff; } }
+
+  /* 收藏夹布局 */
+  .fav-layout { display: flex; width: 100%; height: 100%; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; background: white; min-height: 0; }
+  .fav-sidebar { width: 220px; border-right: 1px solid #e2e8f0; position: relative; background: #f8fafc; flex-shrink: 0; display: block; }
+  .fav-header { height: 50px; display: flex; align-items: center; justify-content: space-between; padding: 0 15px; border-bottom: 1px solid #e2e8f0; background: white; position: absolute; top: 0; left: 0; width: 100%; z-index: 10; box-sizing: border-box; }
+  .fav-title { font-weight: bold; color: #334155; font-size: 14px; }
+  .add-folder-btn { width: 24px; height: 24px; border-radius: 4px; background: #eff6ff; color: #2563eb; display: flex; align-items: center; justify-content: center; font-size: 16px; cursor: pointer; }
+  .folder-list { position: absolute; top: 50px; bottom: 0; left: 0; right: 0; padding: 10px; box-sizing: border-box; overflow-y: auto; }
+  .folder-item { display: flex; align-items: center; padding: 10px; border-radius: 6px; cursor: pointer; color: #64748b; font-size: 13px; margin-bottom: 4px; &:hover { background: #e2e8f0; } &.active { background: #eff6ff; color: #2563eb; font-weight: bold; } }
+  .f-icon { margin-right: 8px; font-size: 14px; }
+  .f-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fav-workspace { flex: 1; min-width: 0; background: #f1f5f9; position: relative; display: block; }
+  .fav-top-bar { height: 50px; background: white; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; position: absolute; top: 0; left: 0; width: 100%; z-index: 10; box-sizing: border-box; }
+  .ft-title { font-weight: bold; color: #1e293b; font-size: 15px; }
+  .ft-desc { font-size: 12px; color: #94a3b8; }
+  .fav-scroll-view { position: absolute; top: 50px; bottom: 0; left: 0; right: 0; width: 100%; box-sizing: border-box; padding: 0; }
+  .empty-fav { height: 100%; width: 100%; display: flex; align-items: center; justify-content: center; color: #94a3b8; font-size: 14px; }
+  .opt-grid { display: grid; gap: 4px 8px; margin-bottom: 10px; color: #334155; }
+  .meta-right { display: flex; align-items: center; }
+  .op-btn { font-weight: bold; cursor: pointer; font-size: 11px; margin-left: 10px; }
+  .op-btn.red { color: #ef4444; }
+  .sidebar, .fav-sidebar, .avatar-wrap, .role-badge, .tag-icon, .f-icon, .info-chip, .tag-badge, .op-btn, .fav-header, .check-icon, .radio-btn { flex-shrink: 0 !important; }
+
+  /* 6. 弹窗样式 */
+  .custom-header { display: flex; justify-content: space-between; align-items: center; padding: 15px 25px; border-bottom: 1px solid #f1f5f9; background: #fff; flex-shrink: 0; min-height: 60px; box-sizing: border-box; }
+  .modal-title { font-weight: 800; font-size: 15px; color: #0f172a; letter-spacing: -0.5px; line-height: 1; margin: 0; }
+  .header-actions { display: flex; gap: 12px; align-items: center; }
+  .h-btn { height: 24px; padding: 0 13px; border-radius: 4px; font-size: 13px; cursor: pointer; background: #f1f5f9; color: #64748b; font-weight: 600; display: flex; align-items: center; justify-content: center; transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); box-sizing: border-box; border: 1px solid transparent; &:hover { background: #e2e8f0; transform: translateY(-1px); } &:active { transform: translateY(0); } &.primary { background: #2563eb; color: white; box-shadow: 0 2px 5px rgba(37, 99, 235, 0.2); &:hover { background: #1d4ed8; box-shadow: 0 4px 10px rgba(37, 99, 235, 0.3); } } &.outline { background: transparent; border-color: #2563eb; color: #2563eb; &:hover { background: #eff6ff; border-color: #1d4ed8; color: #1d4ed8; } } }
+  .edit-content-scroll { padding: 30px 40px; max-height: 70vh; overflow-y: auto; &::-webkit-scrollbar { width: 6px; } &::-webkit-scrollbar-track { background: transparent; } &::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 3px; &:hover { background-color: #94a3b8; } } }
+  .avatar-edit-section { display: flex; flex-direction: column; align-items: center; margin-bottom: 35px; }
+  .avatar-edit-wrapper { width: 108px; height: 108px; border-radius: 50%; position: relative; cursor: pointer; box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08); border: 4px solid white; background: #eff6ff; display: flex; align-items: center; justify-content: center; overflow: hidden; transition: transform 0.3s; &:hover { transform: scale(1.02); box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12); } &:hover .camera-mask { opacity: 1; } &:hover .avatar-img-preview { transform: scale(1.1); } }
+  .avatar-img-preview { width: 100%; height: 100%; object-fit: cover; transition: transform 0.5s ease; }
+  .avatar-placeholder-large { font-size: 44px; color: #3b82f6; font-weight: 800; }
+  .camera-mask { position: absolute; bottom: 0; left: 0; right: 0; height: 32px; background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(2px); display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.2s; }
+  .cam-icon { width: 18px; height: 18px; filter: brightness(0) invert(1); opacity: 0.9; }
+  .tip-text { font-size: 12px; color: #64748b; margin-top: 10px; font-weight: 500; }
+  .edit-form-body { display: flex; flex-direction: column; gap: 24px; }
+  .form-item { display: flex; flex-direction: column; gap: 8px; }
+  .label { font-size: 13px; font-weight: 700; color: #334155; display: flex; align-items: center; white-space: nowrap; }
+  .input-field, .picker-box, .textarea-field { border: 1px solid #cbd5e1; border-radius: 4px; font-size: 14px; color: #1e293b; background: #fff; transition: all 0.2s; box-sizing: border-box; }
+  .input-field, .picker-box { height: 27px; padding: 0 8px; display: flex; align-items: center; }
+  .textarea-field { padding: 8px 6px 8px 10px; height: 90px; width: 100%; line-height: 1.5; }
+  .input-field:focus, .textarea-field:focus { border-color: #2563eb; outline: none; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
+  .text-display-box { height: 27px; display: flex; align-items: center; font-size: 14px; color: #64748b; background: transparent; border: none; padding: 0; }
+  .centered { justify-content: center; }
+  .fix-align { position: relative; top: 1px; line-height: 1; }
+  .code-txt { font-family: "Menlo", "Monaco", monospace; font-weight: 700; letter-spacing: 1px; color: #334155; margin-right: 8px; }
+  .copy-text-btn { color: #2563eb; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; position: relative; top: 0px; &:hover { text-decoration: underline; color: #1d4ed8; } }
+  .form-row-split { display: flex; gap: 10px; align-items: center; }
+  .form-row-split .form-item { flex-direction: row; align-items: center; gap: 8px; }
+  .form-row-split .input-field, .form-row-split .text-display-box { flex: 1; min-width: 0; }
+  .flex-1 { flex: 1; }
+  .picker-box { justify-content: space-between; cursor: pointer; &:hover { border-color: #94a3b8; } }
   .arrow { color: #94a3b8; font-size: 12px; }
-
-  /* 性别单选 */
   .gender-group { display: flex; gap: 25px; align-items: center; }
-  .radio-label {
-    display: flex; align-items: center; gap: 6px;
-    font-size: 14px; color: #64748b; cursor: pointer;
-    &:hover { color: #334155; }
-    &.checked { color: #2563eb; font-weight: 600; }
-  }
+  .radio-label { display: flex; align-items: center; gap: 6px; font-size: 14px; color: #64748b; cursor: pointer; &:hover { color: #334155; } &.checked { color: #2563eb; font-weight: 600; } }
+  .form-item.row-layout { flex-direction: row; align-items: center; gap: 4px; }
+  .form-item.row-layout .input-field, .form-item.row-layout .picker-box, .form-item.row-layout .gender-group { flex: 1; }
+  .form-item.row-layout .label { min-width: 60px; margin-bottom: 0; }
 
-  /* [新增] 通用水平布局类 (用于性别、出生年月、毕业学校) */
-  .form-item.row-layout {
-    flex-direction: row;
-    align-items: center;
-    gap: 4px;
-  }
-  
-  /* 在水平布局中，让内容区撑开 */
-  .form-item.row-layout .input-field,
-  .form-item.row-layout .picker-box,
-  .form-item.row-layout .gender-group {
-    flex: 1;
-  }
-  
-  /* 在水平布局中，标签不占下边距 */
-  .form-item.row-layout .label {
-    min-width: 60px; 
-    margin-bottom: 0;
-  }
+  /* 【核心修改 4】邀请码分栏样式 */
+  .invite-row-split { display: flex; gap: 15px; background: #f8fafc; padding: 10px; border-radius: 6px; border: 1px solid #e2e8f0; }
+  .invite-box { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+  .invite-box.left { border-right: 1px dashed #cbd5e1; padding-right: 15px; }
+  .sub-label { font-size: 11px; color: #64748b; }
+  .code-display { display: flex; align-items: center; justify-content: space-between; height: 30px; }
+  .my-code { font-family: monospace; font-weight: bold; font-size: 16px; color: #334155; letter-spacing: 1px; }
+  .copy-btn { font-size: 11px; color: #2563eb; background: #eff6ff; padding: 2px 8px; border-radius: 4px; cursor: pointer; }
+  .bind-input-box { position: relative; display: flex; align-items: center; }
+  .bind-input { width: 100%; height: 30px; border: 1px solid #cbd5e1; border-radius: 4px; padding: 0 8px; font-size: 13px; background: white; text-transform: uppercase; }
+  .bind-input[disabled] { background: #f1f5f9; color: #94a3b8; border-color: #e2e8f0; }
+  .lock-icon { position: absolute; right: 8px; font-size: 12px; }
+  .bind-tip { font-size: 11px; color: #10b981; margin-top: 4px; margin-left: 4px; }
 </style>
