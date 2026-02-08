@@ -46,8 +46,18 @@ const MINERU_BASE_URL = 'https://mineru.net/api/v4';
 // ==========================================
 // === 工具函数 ===
 // ==========================================
-// 生成6位随机大写字母+数字的ID
-const generateRandomId = () => Math.random().toString(36).substring(2, 8).toUpperCase();
+// [修改] 生成 4 位纯数字 UID (范围 1000-9999)
+const generateUid = () => Math.floor(1000 + Math.random() * 9000).toString();
+
+// [修改] 生成 6 位纯大写字母邀请码 (无数字)
+const generateInviteCode = () => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    let result = '';
+    for (let i = 0; i < 6; i++) {
+        result += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return result;
+};
 
 // ==========================================
 // === 数据库连接 ===
@@ -576,9 +586,9 @@ app.post('/api/auth/register', async (req, res) => {
         const user = new User({ 
             username: req.body.username, 
             password: hashedPassword,
-            uid: generateRandomId(),
-            inviteCode: generateRandomId()
-        }); 
+            uid: generateUid(),           // 改用新的 4 位数字函数
+            inviteCode: generateInviteCode() // 改用新的 6 位字母函数
+        });
         
         await user.save(); 
         res.json({ success: true }); 
