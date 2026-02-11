@@ -177,11 +177,16 @@ const cleanTitle = (text) => {
 };
 
 // 2. 内容处理：提取图片 URL 并清理 HTML 标签，保留 LaTeX 公式
+// 2. 内容处理
+// 2. 内容处理：稳健版，修复500错误并增强样式识别
 const processContent = (text, imageAssets) => {
     if (!text) return '';
     let processed = text;
     
-    // A. 提取 Markdown 图片 ![]()
+    // 0. 预处理：反转义
+    processed = processed.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+
+    // A. 图片处理
     processed = processed.replace(/!\[.*?\]\((.*?)\)/g, (match, url) => {
         let name = url.split('/').pop().split('?')[0];
         if(!name.includes('.')) name += '.jpg';
@@ -189,8 +194,6 @@ const processContent = (text, imageAssets) => {
         imageAssets[name] = url; 
         return `\\includegraphics{${name}}`; 
     });
-    
-    // B. 提取系统格式图片 [img:...]
     processed = processed.replace(/\[img:(.*?):([lmr]):(\d+)\]/g, (match, url) => {
         let name = url.split('/').pop().split('?')[0];
         if(!name.includes('.')) name += '.jpg';
@@ -199,19 +202,51 @@ const processContent = (text, imageAssets) => {
         return `\\includegraphics{${name}}`;
     });
 
-    // C. 处理 HTML 换行 -> LaTeX 换行 (Pandoc 视空行为段落)
+    // --- B. 核心修复：通用标签样式处理器 ---
+    // 这个正则会捕获所有 div/p 标签及其 style 属性，然后根据属性内容决定生成什么 LaTeX
+    processed = processed.replace(/<(div|p)[^>]*style=['"]([^'"]*)['"][^>]*>([\s\S]*?)<\/\1>/gi, (match, tag, style, content) => {
+        let tex = content.trim();
+        const styleLower = style.toLowerCase();
+
+        // 1. 检测加粗 (font-weight: bold)
+        if (styleLower.includes('font-weight: bold') || styleLower.includes('font-weight:bold')) {
+            tex = `\\textbf{${tex}}`;
+        }
+
+        // 2. 检测居中 (text-align: center)
+        // 使用 {\centering ... \par} 代替 \begin{center}，避免 500 错误
+        if (styleLower.includes('text-align: center') || styleLower.includes('text-align:center')) {
+            return `\n\n{\\centering ${tex} \\par}\n\n`;
+        }
+
+        // 3. 检测缩进 (text-indent: 2em)
+        if (styleLower.includes('text-indent')) {
+            return `\n\n\\hspace{2em}${tex}\n\n`;
+        }
+
+        return `\n\n${tex}\n\n`;
+    });
+
+    // --- C. 兼容自定义标签 [居中][缩进] ---
+    processed = processed.replace(/\[居中\]([\s\S]*?)(\[\/居中\]|$)/gi, (match, content) => {
+         return `\n\n{\\centering ${content.replace(/\[\/?居中\]/g, '').trim()} \\par}\n\n`;
+    });
+    processed = processed.replace(/\[缩进\]/gi, '\\hspace{2em}');
+
+    // --- D. 其他内联样式 ---
+    processed = processed.replace(/<(?:b|strong)[^>]*>(.*?)<\/(?:b|strong)>/gi, '\\textbf{$1}');
+    processed = processed.replace(/<(?:i|em)[^>]*>(.*?)<\/(?:i|em)>/gi, '\\textit{$1}');
+    processed = processed.replace(/<u[^>]*>(.*?)<\/u>/gi, '\\underline{$1}');
+
+    // --- E. 换行与清理 ---
     processed = processed.replace(/<br\s*\/?>/gi, '\n\n')
                          .replace(/<\/p>/gi, '\n\n')
                          .replace(/<\/div>/gi, '\n\n');
-
-    // D. 去除剩余 HTML 标签 (保留内容)
     processed = processed.replace(/<[^>]+>/g, ''); 
-
-    // E. 实体解码
-    processed = processed.replace(/&nbsp;/g, ' ')
-                         .replace(/&lt;/g, '<')
-                         .replace(/&gt;/g, '>')
-                         .replace(/&amp;/g, '&');
+    processed = processed.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&');
+    
+    // 强制把连续换行符转为 LaTeX 分段
+    processed = processed.replace(/\n+/g, '\n\n');
 
     return processed.trim();
 };
@@ -220,18 +255,15 @@ const processContent = (text, imageAssets) => {
 const generateLatexCode = () => {
     let imageAssets = {};
     
-    // 基础文档结构：加入 enumitem 宏包以支持 label 自定义
+    // 基础文档结构
     let tex = `\\documentclass[12pt]{article} 
 \\usepackage{graphicx}
 \\usepackage{amsmath}
 \\usepackage{amssymb}
 \\usepackage{enumitem}
 
-% 1. 设置西文和公式字体为 Times New Roman (新罗马)
-% mathptmx 会自动将正文西文和数学公式(斜体)都设为新罗马风格
+% 字体设置
 \\usepackage{mathptmx}
-
-% 2. 设置中文字体为宋体 (需要后端使用 XeLaTeX 引擎)
 \\usepackage{xeCJK}
 \\setCJKmainfont{SimSun}
 
@@ -246,27 +278,20 @@ ${cleanTitle(titles.sub)}
 `;
 
     props.questions.forEach((q, idx) => {
-        // 题干 (使用 cleanTitle 处理标题，避免 \section 内换行报错)
-        // 使用 processContent 处理题目内容，但是 title 作为 section 参数要小心
-        // 这里我们将 idx 和 title 分开，title 放 section，内容放正文，或者全部放 section
-        // 为了安全起见，我们将题目作为 \section*，并确保没有换行
         let safeTitle = processContent(q.title, imageAssets);
-        // 如果题目内容太长或包含换行，最好用 \paragraph 或粗体，而不是 \section
-        // 但为了保持结构，我们先尝试清洗换行
-        safeTitle = safeTitle.replace(/\n\n/g, ' ').replace(/\n/g, ' '); 
         
-        tex += `\\section*{${idx + 1}. ${safeTitle}}\n`;
+        // --- 【关键修改】 ---
+        // 弃用 \section*，因为它不支持 \begin{center} 或 \n
+        // 改用 \textbf 加粗序号，内容直接拼接，允许内容自带换行或居中
+        tex += `\\par\\bigskip\\noindent\\textbf{${idx + 1}.}\n${safeTitle}\\par\\medskip\n`;
+        // ------------------
         
-        // 选项 (使用 enumerate + label=\Alph*. 自动生成 A. B. C.)
+        // 选项处理
         if (q.options) {
             const keys = Object.keys(q.options).sort();
             if(keys.length > 0) {
                 tex += `\\begin{enumerate}[label=\\Alph*.]\n`;
                 keys.forEach(key => {
-                    // 这里我们假设 keys 是 A, B, C... 顺序
-                    // 如果 keys 是 A, C 这种不连续的，自动编号可能会变成 A, B。
-                    // 但为了 Pandoc 稳定性，自动编号是最好的。如果一定要对应 Key，可以使用 description
-                    // 鉴于通常选项都是连续的，我们使用自动编号
                     if(q.options[key]) {
                         tex += `\\item ${processContent(q.options[key], imageAssets)}\n`;
                     }
@@ -275,14 +300,12 @@ ${cleanTitle(titles.sub)}
             }
         }
 
-        // 子题 (使用 enumerate + label=(\arabic*) 自动生成 (1) (2))
-        // 解决了 \item[(1)] 导致的解析错误
+        // 子题处理
         if (q.subQuestions && q.subQuestions.length) {
             tex += `\\begin{enumerate}[label=(\\arabic*)]\n`;
             q.subQuestions.forEach((sub, sIdx) => {
                 tex += `\\item ${processContent(sub.content, imageAssets)}\n`;
                 
-                // 子题也有选项的情况
                 if(sub.options) {
                      const subKeys = Object.keys(sub.options).sort();
                      if(subKeys.length > 0) {
@@ -326,6 +349,11 @@ const handleExport = async () => {
     try {
         const { sourceCode, imageAssets } = generateLatexCode();
         
+        // --- 请添加下面这几行 console.log ---
+        console.log('【调试】原始题目数据(第一题):', JSON.stringify(props.questions[0], null, 2));
+        console.log('【调试】生成的LaTeX源码:', sourceCode);
+        // -----------------------------------
+
         const res = await new Promise((resolve, reject) => {
             uni.request({
                 url: 'http://localhost:3001/api/compile/word', 
