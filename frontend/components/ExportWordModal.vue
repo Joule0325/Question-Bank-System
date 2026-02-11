@@ -3,10 +3,10 @@
     <view class="export-modal-container">
       
       <view class="modal-header">
-        <view class="modal-title">导出 Word</view>
+        <view class="modal-title">导出 Word (原生公式版)</view>
         <view class="header-actions">
           <button class="action-btn primary" @click="handleExport" :disabled="isExporting">
-            {{ isExporting ? '生成中...' : '导出 Word' }}
+            {{ isExporting ? '请求编译中...' : '生成 Word' }}
           </button>
           <button class="action-btn danger" @click="close">关闭</button>
         </view>
@@ -16,7 +16,7 @@
         
         <view class="col col-source">
           <view class="col-title">
-            <view class="tab-item active">📄 效果预览</view>
+            <view class="tab-item active">📄 导出内容预览</view>
           </view>
 
           <view class="word-preview-container">
@@ -40,7 +40,7 @@
                             <LatexText :text="q.title" />
                         </view>
                         
-                        <view v-if="q.options && (q.options.A || q.options.B)" class="q-opts" :style="{gridTemplateColumns: `repeat(${q.optionLayout||4}, 1fr)`}">
+                        <view v-if="q.options" class="q-opts">
                             <view v-for="(v, k) in q.options" :key="k" class="opt-i">
                                 <text class="b">{{ k }}.</text><LatexText :text="v" />
                             </view>
@@ -65,33 +65,15 @@
             <view class="setting-group">
               <text class="group-label">试卷标题</text>
               <view class="input-row">
-                <input class="custom-input" v-model="titles.main" placeholder="主标题 (如: 2026模拟考)" />
+                <input class="custom-input" v-model="titles.main" placeholder="主标题" />
               </view>
               <view class="input-row" style="margin-top: 8px;">
-                <input class="custom-input" v-model="titles.sub" placeholder="副标题 (如: 物理试题)" />
+                <input class="custom-input" v-model="titles.sub" placeholder="副标题" />
               </view>
             </view>
 
             <view class="setting-group">
-              <text class="group-label">试卷模板</text>
-              <view class="template-grid">
-                <view 
-                  class="tpl-card" 
-                  v-for="(tpl, idx) in templates" 
-                  :key="tpl.id"
-                  :class="{ selected: selectedTplId === tpl.id }"
-                  @click="selectTemplate(tpl)"
-                >
-                  <view class="tpl-thumb">
-                    <view class="thumb-placeholder" :style="{ background: selectedTplId === tpl.id ? '#E0F2FE' : '#F3F4F6' }"></view>
-                  </view>
-                  <text class="tpl-name">{{ tpl.name }}</text>
-                </view>
-              </view>
-            </view>
-
-            <view class="setting-group">
-              <text class="group-label">试题属性 (显示在题干前)</text>
+              <text class="group-label">试题属性 (仅预览可见)</text>
               <view class="checkbox-list">
                 <view 
                   class="cb-item" 
@@ -126,24 +108,11 @@
             </view>
             
             <view class="setting-group">
-              <text class="group-label">答案位置</text>
-              <view class="radio-list">
-                <view 
-                  class="radio-item" 
-                  :class="{ active: answerPos === 'end' }"
-                  @click="answerPos = 'end'"
-                >
-                  <view class="radio-circle"><view class="radio-dot" v-if="answerPos === 'end'"></view></view>
-                  <text class="radio-label">试卷末尾</text>
-                </view>
-                <view 
-                  class="radio-item" 
-                  :class="{ active: answerPos === 'question' }"
-                  @click="answerPos = 'question'"
-                >
-                  <view class="radio-circle"><view class="radio-dot" v-if="answerPos === 'question'"></view></view>
-                  <text class="radio-label">每题之后</text>
-                </view>
+              <text class="group-label">说明</text>
+              <view class="info-box">
+                此模式将生成标准 LaTeX 源码并发送至后端，由 Pandoc 引擎转换为 .docx 文件。
+                <br/><br/>
+                <b>优势：</b>公式将转换为 Word 原生 Office Math 对象，可直接编辑。
               </view>
             </view>
 
@@ -156,8 +125,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, watch, nextTick } from 'vue';
-import { saveAs } from 'file-saver';
+import { ref, reactive } from 'vue';
 import LatexText from '@/components/LatexText.vue';
 
 const props = defineProps({
@@ -171,8 +139,6 @@ const isExporting = ref(false);
 
 // --- 设置状态 ---
 const titles = reactive({ main: '高中物理练习题', sub: '测试卷' });
-const answerPos = ref('end');
-const selectedTplId = ref(1);
 
 const metadata = reactive({
   year: true,
@@ -194,79 +160,225 @@ const metadataOpts = [
   { key: 'difficulty', label: '难度' }
 ];
 
-const templates = ref([
-  { id: 1, name: "标准试卷" },
-  { id: 2, name: "两栏紧凑" },
-  { id: 3, name: "答题卡A3" },
-  { id: 4, name: "作业练习" }
-]);
-
 const close = () => { emit('update:visible', false); };
 const toggleMeta = (key) => { metadata[key] = !metadata[key]; };
 const toggleContent = (key) => { contentSettings[key] = !contentSettings[key]; };
-const selectTemplate = (tpl) => { selectedTplId.value = tpl.id; };
 
-const handleExport = () => {
-    isExporting.value = true;
+// --- 核心工具函数 ---
+
+// 1. 标题清洗：去除换行符，防止 \section{...} 报错
+const cleanTitle = (text) => {
+    if (!text) return '';
+    // 去除 HTML 标签
+    let clean = text.replace(/<[^>]+>/g, '');
+    // 将换行符替换为空格
+    clean = clean.replace(/[\r\n]+/g, ' ').trim();
+    return clean;
+};
+
+// 2. 内容处理：提取图片 URL 并清理 HTML 标签，保留 LaTeX 公式
+const processContent = (text, imageAssets) => {
+    if (!text) return '';
+    let processed = text;
     
-    // 简单的 HTML 转 Doc 导出实现 (MIME trick)
-    try {
-        let htmlContent = `
-            <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
-            <head>
-                <meta charset="utf-8">
-                <title>${titles.main}</title>
-                <style>
-                    body { font-family: 'SimSun'; }
-                    .main-title { font-size: 24pt; font-weight: bold; text-align: center; }
-                    .sub-title { font-size: 16pt; text-align: center; margin-bottom: 20px; }
-                    .q-item { margin-bottom: 15px; }
-                    .q-title { font-size: 12pt; font-weight: bold; }
-                    .q-opts { margin-top: 5px; margin-left: 20px; display: flex; flex-wrap: wrap; }
-                    .opt-item { margin-right: 20px; }
-                </style>
-            </head>
-            <body>
-                <div class="main-title">${titles.main}</div>
-                <div class="sub-title">${titles.sub}</div>
-        `;
+    // A. 提取 Markdown 图片 ![]()
+    processed = processed.replace(/!\[.*?\]\((.*?)\)/g, (match, url) => {
+        let name = url.split('/').pop().split('?')[0];
+        if(!name.includes('.')) name += '.jpg';
+        try { name = decodeURIComponent(name); } catch(e){}
+        imageAssets[name] = url; 
+        return `\\includegraphics{${name}}`; 
+    });
+    
+    // B. 提取系统格式图片 [img:...]
+    processed = processed.replace(/\[img:(.*?):([lmr]):(\d+)\]/g, (match, url) => {
+        let name = url.split('/').pop().split('?')[0];
+        if(!name.includes('.')) name += '.jpg';
+        try { name = decodeURIComponent(name); } catch(e){}
+        imageAssets[name] = url;
+        return `\\includegraphics{${name}}`;
+    });
+
+    // C. 处理 HTML 换行 -> LaTeX 换行 (Pandoc 视空行为段落)
+    processed = processed.replace(/<br\s*\/?>/gi, '\n\n')
+                         .replace(/<\/p>/gi, '\n\n')
+                         .replace(/<\/div>/gi, '\n\n');
+
+    // D. 去除剩余 HTML 标签 (保留内容)
+    processed = processed.replace(/<[^>]+>/g, ''); 
+
+    // E. 实体解码
+    processed = processed.replace(/&nbsp;/g, ' ')
+                         .replace(/&lt;/g, '<')
+                         .replace(/&gt;/g, '>')
+                         .replace(/&amp;/g, '&');
+
+    return processed.trim();
+};
+
+// 3. 生成完整 LaTeX 源码 (修复了列表结构)
+const generateLatexCode = () => {
+    let imageAssets = {};
+    
+    // 基础文档结构：加入 enumitem 宏包以支持 label 自定义
+    let tex = `\\documentclass[12pt]{article} 
+\\usepackage{graphicx}
+\\usepackage{amsmath}
+\\usepackage{amssymb}
+\\usepackage{enumitem}
+
+% 1. 设置西文和公式字体为 Times New Roman (新罗马)
+% mathptmx 会自动将正文西文和数学公式(斜体)都设为新罗马风格
+\\usepackage{mathptmx}
+
+% 2. 设置中文字体为宋体 (需要后端使用 XeLaTeX 引擎)
+\\usepackage{xeCJK}
+\\setCJKmainfont{SimSun}
+
+\\title{${cleanTitle(titles.main)}}
+\\date{}
+\\begin{document}
+\\maketitle
+\\begin{center}
+${cleanTitle(titles.sub)}
+\\end{center}
+
+`;
+
+    props.questions.forEach((q, idx) => {
+        // 题干 (使用 cleanTitle 处理标题，避免 \section 内换行报错)
+        // 使用 processContent 处理题目内容，但是 title 作为 section 参数要小心
+        // 这里我们将 idx 和 title 分开，title 放 section，内容放正文，或者全部放 section
+        // 为了安全起见，我们将题目作为 \section*，并确保没有换行
+        let safeTitle = processContent(q.title, imageAssets);
+        // 如果题目内容太长或包含换行，最好用 \paragraph 或粗体，而不是 \section
+        // 但为了保持结构，我们先尝试清洗换行
+        safeTitle = safeTitle.replace(/\n\n/g, ' ').replace(/\n/g, ' '); 
         
-        props.questions.forEach((q, idx) => {
-            // 题干
-            let attr = [];
-            if(metadata.year && q.year) attr.push(q.year);
-            if(metadata.province && q.province) attr.push(q.province);
-            if(metadata.difficulty && q.difficulty) attr.push(q.difficulty+'星');
-            let attrStr = attr.length ? `(${attr.join(' ')})` : '';
-            
-            // 简单的文本处理，实际 Word 导出可能需要更复杂的 HTML 清洗
-            let qTitle = q.title.replace(/<[^>]+>/g, ''); 
-            
-            htmlContent += `
-                <div class="q-item">
-                    <p class="q-title">${idx+1}. ${attrStr} ${qTitle}</p>
-            `;
-            
-            // 选项
-            if(q.options) {
-                htmlContent += `<div class="q-opts">`;
-                for(let k in q.options) {
-                    if(q.options[k]) htmlContent += `<span class="opt-item">${k}. ${q.options[k].replace(/<[^>]+>/g,'')}</span>`;
-                }
-                htmlContent += `</div>`;
+        tex += `\\section*{${idx + 1}. ${safeTitle}}\n`;
+        
+        // 选项 (使用 enumerate + label=\Alph*. 自动生成 A. B. C.)
+        if (q.options) {
+            const keys = Object.keys(q.options).sort();
+            if(keys.length > 0) {
+                tex += `\\begin{enumerate}[label=\\Alph*.]\n`;
+                keys.forEach(key => {
+                    // 这里我们假设 keys 是 A, B, C... 顺序
+                    // 如果 keys 是 A, C 这种不连续的，自动编号可能会变成 A, B。
+                    // 但为了 Pandoc 稳定性，自动编号是最好的。如果一定要对应 Key，可以使用 description
+                    // 鉴于通常选项都是连续的，我们使用自动编号
+                    if(q.options[key]) {
+                        tex += `\\item ${processContent(q.options[key], imageAssets)}\n`;
+                    }
+                });
+                tex += `\\end{enumerate}\n`;
             }
-            
-            htmlContent += `</div>`;
+        }
+
+        // 子题 (使用 enumerate + label=(\arabic*) 自动生成 (1) (2))
+        // 解决了 \item[(1)] 导致的解析错误
+        if (q.subQuestions && q.subQuestions.length) {
+            tex += `\\begin{enumerate}[label=(\\arabic*)]\n`;
+            q.subQuestions.forEach((sub, sIdx) => {
+                tex += `\\item ${processContent(sub.content, imageAssets)}\n`;
+                
+                // 子题也有选项的情况
+                if(sub.options) {
+                     const subKeys = Object.keys(sub.options).sort();
+                     if(subKeys.length > 0) {
+                        tex += `\\begin{enumerate}[label=\\Alph*.]\n`;
+                        subKeys.forEach(k => {
+                            if(sub.options[k]) tex += `\\item ${processContent(sub.options[k], imageAssets)}\n`;
+                        });
+                        tex += `\\end{enumerate}\n`;
+                     }
+                }
+            });
+            tex += `\\end{enumerate}\n`;
+        }
+
+        // 答案与解析
+        let ansBlock = [];
+        if (q.subQuestions && q.subQuestions.length) {
+             q.subQuestions.forEach((sub, sIdx) => {
+                 if (contentSettings.answer && sub.answer) ansBlock.push(`(${sIdx+1}) 答案：${processContent(sub.answer, imageAssets)}`);
+                 if (contentSettings.analysis && sub.analysis) ansBlock.push(`(${sIdx+1}) 解析：${processContent(sub.analysis, imageAssets)}`);
+                 if (contentSettings.detailed && sub.detailed) ansBlock.push(`(${sIdx+1}) 详解：${processContent(sub.detailed, imageAssets)}`);
+             });
+        } else {
+             if (contentSettings.answer && q.answer) ansBlock.push(`\\textbf{答案：} ${processContent(q.answer, imageAssets)}`);
+             if (contentSettings.analysis && q.analysis) ansBlock.push(`\\textbf{解析：} ${processContent(q.analysis, imageAssets)}`);
+             if (contentSettings.detailed && q.detailed) ansBlock.push(`\\textbf{详解：} ${processContent(q.detailed, imageAssets)}`);
+        }
+        
+        if (ansBlock.length > 0) {
+             tex += `\n\n${ansBlock.join('\n\n')}\n\n`;
+        }
+    });
+
+    tex += `\\end{document}`;
+    return { sourceCode: tex, imageAssets };
+};
+
+// --- 导出主逻辑 ---
+const handleExport = async () => {
+    isExporting.value = true;
+    try {
+        const { sourceCode, imageAssets } = generateLatexCode();
+        
+        const res = await new Promise((resolve, reject) => {
+            uni.request({
+                url: 'http://localhost:3001/api/compile/word', 
+                method: 'POST',
+                data: { sourceCode, imageAssets },
+                header: { 
+                    'Authorization': 'Bearer ' + uni.getStorageSync('token'),
+                    'Content-Type': 'application/json'
+                },
+                success: (r) => {
+                    if(r.statusCode === 200 && r.data.url) resolve(r.data);
+                    else reject(r.data.error || '后端编译失败');
+                },
+                fail: (e) => reject(e)
+            });
         });
-        
-        htmlContent += `</body></html>`;
-        
-        const blob = new Blob([htmlContent], { type: 'application/msword' });
-        saveAs(blob, `${titles.main || '试卷'}.doc`);
-        uni.showToast({ title: '已导出', icon: 'success' });
-        
-    } catch(e) {
-        uni.showToast({ title: '导出失败', icon: 'none' });
+
+        // 下载文件
+        uni.downloadFile({
+            url: res.url,
+            success: (downloadRes) => {
+                if (downloadRes.statusCode === 200) {
+                    // #ifdef H5
+                    const a = document.createElement('a');
+                    a.href = res.url;
+                    a.download = `${titles.main || '试卷'}.docx`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    uni.showToast({ title: '已开始下载', icon: 'success' });
+                    // #endif
+
+                    // #ifndef H5
+                    uni.saveFile({
+                        tempFilePath: downloadRes.tempFilePath,
+                        success: function (saveRes) {
+                            uni.showToast({ title: '保存成功', icon: 'success' });
+                        },
+                        fail: () => uni.showToast({ title: '保存失败', icon: 'none' })
+                    });
+                    // #endif
+                }
+            },
+            fail: () => uni.showToast({ title: '下载失败', icon: 'none' })
+        });
+
+    } catch (e) {
+        console.error(e);
+        uni.showModal({ 
+            title: '导出失败', 
+            content: typeof e === 'string' ? e : (e.errMsg || '请检查后端日志或 Pandoc 安装'), 
+            showCancel: false 
+        });
     } finally {
         isExporting.value = false;
     }
@@ -340,51 +452,16 @@ const handleExport = () => {
   .setting-group { margin-bottom: 24px; }
   .group-label { font-size: 13px; font-weight: bold; color: #374151; margin-bottom: 12px; display: block; }
   .custom-input { width: 100%; padding: 8px; border: 1px solid #D1D5DB; border-radius: 4px; font-size: 14px; box-sizing: border-box; }
+  .info-box { font-size: 12px; color: #4B5563; background: #EFF6FF; padding: 10px; border-radius: 4px; line-height: 1.5; border: 1px solid #DBEAFE; }
   
-  .checkbox-list, .radio-list { display: flex; flex-direction: column; gap: 10px; }
-  .cb-item, .radio-item {
+  .checkbox-list { display: flex; flex-direction: column; gap: 10px; }
+  .cb-item {
     display: flex; align-items: center; gap: 8px; cursor: pointer;
     .cb-box {
       width: 16px; height: 16px; border: 1px solid #D1D5DB; border-radius: 4px; display: flex; align-items: center; justify-content: center; background: #fff;
       &.checked { background: #3B82F6; border-color: #3B82F6; .check-mark { font-size: 12px; color: white; } }
     }
-    .radio-circle {
-      width: 16px; height: 16px; border: 1px solid #D1D5DB; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: #fff;
-      .radio-dot { width: 8px; height: 8px; background: #3B82F6; border-radius: 50%; }
-    }
-    &.active .radio-circle { border-color: #3B82F6; }
-    .cb-label, .radio-label { font-size: 14px; color: #4B5563; }
-  }
-
-  .template-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-    
-    .tpl-card {
-      background: #fff;
-      border: 1px solid #E5E7EB;
-      border-radius: 6px;
-      padding: 8px;
-      cursor: pointer;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      transition: all 0.2s;
-      
-      &:hover { border-color: #3B82F6; }
-      &.selected { border-color: #3B82F6; background-color: #EFF6FF; }
-      
-      .tpl-thumb {
-        width: 100%;
-        height: 50px;
-        background: #F3F4F6;
-        border-radius: 4px;
-        margin-bottom: 8px;
-        .thumb-placeholder { width: 100%; height: 100%; border-radius: 4px; }
-      }
-      .tpl-name { font-size: 12px; color: #374151; }
-    }
+    .cb-label { font-size: 14px; color: #4B5563; }
   }
 }
 </style>
