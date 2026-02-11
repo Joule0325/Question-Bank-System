@@ -991,4 +991,93 @@ app.post('/api/compile', async (req, res) => {
     }
 });
 
+// [新增] Word 编译接口 (依赖 Pandoc)
+app.post('/api/compile/word', async (req, res) => {
+    let { sourceCode, imageAssets } = req.body; 
+    if (!sourceCode) return res.status(400).json({ error: '无 LaTeX 代码' });
+
+    const timestamp = Date.now();
+    const jobDir = path.join(compileDir, `word_job_${timestamp}`);
+    if (!fs.existsSync(jobDir)) { fs.mkdirSync(jobDir, { recursive: true }); }
+    const imagesDir = path.join(jobDir, 'images');
+    if (!fs.existsSync(imagesDir)) { fs.mkdirSync(imagesDir, { recursive: true }); }
+
+    const texFile = path.join(jobDir, `paper.tex`);
+    const docxFilename = `paper.docx`;
+    
+    try {
+        // 1. 处理图片 (复用 PDF 的逻辑，Pandoc 也需要本地图片路径)
+        if (imageAssets && typeof imageAssets === 'object') {
+            let imgCounter = 0;
+            const entries = Object.entries(imageAssets);
+            for (const [originalSaveFilename, url] of entries) {
+                const ext = path.extname(originalSaveFilename) || '.jpg';
+                const safeFilename = `img_${imgCounter++}${ext}`;
+                const destPath = path.join(imagesDir, safeFilename);
+                let img = null;
+                try {
+                    // 处理本地
+                    if (url.includes('/uploads/')) {
+                        try {
+                            const urlPart = url.split('/uploads/')[1];
+                            if (urlPart) {
+                                const realFilename = decodeURIComponent(urlPart);
+                                const srcPath = path.join(uploadDir, realFilename);
+                                if (fs.existsSync(srcPath)) img = await Jimp.read(srcPath);
+                            }
+                        } catch (localErr) {}
+                    }
+                    // 处理网络
+                    if (!img) img = await Jimp.read(url);
+                    
+                    if (img) {
+                        await img.write(destPath); 
+                        // 替换源码路径 (Pandoc 需要相对路径)
+                        sourceCode = sourceCode.split(originalSaveFilename).join(`images/${safeFilename}`);
+                    }
+                } catch (err) {
+                    // 占位图
+                    new Jimp({ width: 100, height: 100, color: 0xFFFFFFFF }).write(destPath);
+                    sourceCode = sourceCode.split(originalSaveFilename).join(`images/${safeFilename}`);
+                }
+            }
+        }
+
+        // 2. 写入 Tex 文件
+        fs.writeFileSync(texFile, sourceCode);
+
+        // 3. 调用 Pandoc 转换
+        // -f latex: 输入格式 latex
+        // -t docx: 输出格式 docx
+        // --standalone: 生成完整文档
+        const templatePath = path.join(process.cwd(), 'template.docx');
+    
+        // 构建命令：如果有模板，就应用模板
+        let cmd = `pandoc "paper.tex" -f latex -t docx -o "${docxFilename}" --standalone`;
+    
+        if (fs.existsSync(templatePath)) {
+            console.log('Using Word template:', templatePath);
+            cmd += ` --reference-doc="${templatePath}"`;
+        } else {
+            console.warn('Warning: template.docx not found, using default styles.');
+        }
+        
+        exec(cmd, { cwd: jobDir }, (error, stdout, stderr) => {
+            if (error) {
+                console.error('[Pandoc] Error:', stderr);
+                return res.status(500).json({ error: 'Word 转换失败，请检查服务器是否安装了 Pandoc', details: stderr });
+            }
+
+            const protocol = req.protocol;
+            const host = req.get('host');
+            // 返回下载链接
+            res.json({ url: `${protocol}://${host}/temp/word_job_${timestamp}/${docxFilename}` });
+        });
+
+    } catch (e) {
+        console.error('[Compile Word] Server Error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
 app.listen(PORT, () => console.log(`🚀 API Server running on port ${PORT}`));
