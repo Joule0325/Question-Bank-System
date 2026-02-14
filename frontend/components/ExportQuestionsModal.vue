@@ -25,6 +25,7 @@
         </view>
 
         <view class="header-actions">
+		  <view class="h-btn outline" @click="handleSave(false)" style="margin-right: 10px;">💾 保存</view>
           <view 
             class="h-btn primary" 
             @click="handleExport" 
@@ -176,10 +177,46 @@ import { compilePaper } from '@/api/question.js';
 
 const props = defineProps({
   visible: Boolean,
-  questions: { type: Array, default: () => [] }
+  questions: { type: Array, default: () => [] },
+  initData: { type: Object, default: null }
 });
 
 const emit = defineEmits(['update:visible', 'export']);
+
+// [新增] 保存逻辑
+const handleSave = (isDownload = false) => {
+    // 1. 构造保存数据
+    const saveData = {
+        id: props.initData?.id || Date.now().toString(), // 有旧ID用旧的，没有生成新的
+        title: titles.main,
+        subTitle: titles.sub,
+        type: 'pdf',
+        updateTime: new Date().toLocaleString(),
+        status: isDownload ? '已下载' : '草稿',
+        questions: props.questions,
+        config: {
+            titles: { ...titles },
+            answerPos: answerPos.value,
+            selectedTplId: selectedTplId.value,
+            metadata: { ...metadata },
+            contentSettings: { ...contentSettings }
+        }
+    };
+
+    // 2. 存入本地缓存
+    let papers = uni.getStorageSync('USER_SAVED_PAPERS') || [];
+    const idx = papers.findIndex(p => p.id === saveData.id);
+    if (idx >= 0) papers[idx] = saveData; // 存在则更新
+    else papers.unshift(saveData); // 不存在则追加
+    
+    uni.setStorageSync('USER_SAVED_PAPERS', papers);
+
+    // 3. 提示并通知父组件
+    if (!isDownload) {
+        uni.showToast({ title: '保存成功', icon: 'success' });
+        emit('save'); // 需要在 defineEmits 里加一个 'save'
+    }
+};
 
 // 状态管理
 const sourceCode = ref('');
@@ -570,6 +607,7 @@ const handleCompile = async () => {
 
 const handleExport = async () => {
   if (isExporting.value) return;
+  handleSave(true);
   isExporting.value = true;
   uni.showLoading({ title: '打包资源中...', mask: true });
 
@@ -608,6 +646,20 @@ const selectTemplate = (tpl) => { selectedTplId.value = tpl.id; debounceGenerate
 watch(() => props.visible, (newVal) => { if (newVal) generateLatex(); });
 watch(() => props.questions, () => { if (props.visible) { generateLatex(); pdfUrl.value = ''; } }, { deep: true });
 watch(answerPos, generateLatex);
+
+watch(() => props.visible, (newVal) => {
+    if (newVal && props.initData && props.initData.config) {
+        const cfg = props.initData.config;
+        if (cfg.titles) Object.assign(titles, cfg.titles);
+        if (cfg.metadata) Object.assign(metadata, cfg.metadata);
+        if (cfg.contentSettings) Object.assign(contentSettings, cfg.contentSettings);
+        if (cfg.answerPos) answerPos.value = cfg.answerPos;
+        if (cfg.selectedTplId) selectedTplId.value = cfg.selectedTplId;
+        // 触发一次重新生成
+        generateLatex();
+    }
+});
+
 </script>
 
 <style lang="scss" scoped>
@@ -625,7 +677,7 @@ watch(answerPos, generateLatex);
 .export-modal-container {
   width: 1200px;
   max-width: 95vw;
-  height: auto;
+  height: 800px;
   max-height: 85vh;
   background-color: #F3F4F6;
   border-radius: 4px;

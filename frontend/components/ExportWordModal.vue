@@ -5,6 +5,8 @@
       <view class="modal-header">
         <view class="modal-title">导出 Word (原生公式版)</view>
         <view class="header-actions">
+          <button class="action-btn outline" @click="handleSave(false)" style="margin-right:10px; border:1px solid #2563eb; color:#2563eb; background:transparent;">💾 保存</button>
+          
           <button class="action-btn primary" @click="handleExport" :disabled="isExporting">
             {{ isExporting ? '请求编译中...' : '生成 Word' }}
           </button>
@@ -125,15 +127,17 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue';
+import { ref, reactive, watch } from 'vue';
 import LatexText from '@/components/LatexText.vue';
 
 const props = defineProps({
   visible: Boolean,
-  questions: { type: Array, default: () => [] }
+  questions: { type: Array, default: () => [] },
+  // [新增] 这一行，用于接收回显数据
+  initData: { type: Object, default: null }
 });
 
-const emit = defineEmits(['update:visible']);
+const emit = defineEmits(['update:visible', 'save']);
 
 const isExporting = ref(false);
 
@@ -161,6 +165,39 @@ const metadataOpts = [
 ];
 
 const close = () => { emit('update:visible', false); };
+
+// [新增] 保存逻辑
+const handleSave = (isDownload = false) => {
+    const saveData = {
+        id: props.initData?.id || Date.now().toString(), // 编辑则沿用ID，否则新建
+        title: titles.main,
+        subTitle: titles.sub,
+        type: 'word',
+        updateTime: new Date().toLocaleString(),
+        status: isDownload ? '已下载' : '草稿',
+        questions: props.questions,
+        config: {
+            titles: { ...titles },
+            metadata: { ...metadata },
+            contentSettings: { ...contentSettings }
+        }
+    };
+
+    // 读取本地存储并更新
+    let papers = uni.getStorageSync('USER_SAVED_PAPERS') || [];
+    const idx = papers.findIndex(p => p.id === saveData.id);
+    if (idx >= 0) papers[idx] = saveData; // 覆盖旧的
+    else papers.unshift(saveData); // 插入新的
+    
+    uni.setStorageSync('USER_SAVED_PAPERS', papers);
+
+    // 如果不是因为下载而触发的自动保存，则提示用户
+    if (!isDownload) {
+        uni.showToast({ title: '保存成功', icon: 'success' });
+        emit('save'); // 通知父组件刷新列表
+    }
+};
+
 const toggleMeta = (key) => { metadata[key] = !metadata[key]; };
 const toggleContent = (key) => { contentSettings[key] = !contentSettings[key]; };
 
@@ -349,6 +386,7 @@ ${cleanTitle(titles.sub)}
 // --- 导出主逻辑 ---
 const handleExport = async () => {
     isExporting.value = true;
+	handleSave(true);
     try {
         const { sourceCode, imageAssets } = generateLatexCode();
         
@@ -414,6 +452,16 @@ const handleExport = async () => {
         isExporting.value = false;
     }
 };
+
+// [新增] 监听回显：当弹窗打开且有初始数据时，恢复配置
+watch(() => props.visible, (newVal) => {
+    if (newVal && props.initData && props.initData.config) {
+        const cfg = props.initData.config;
+        if (cfg.titles) Object.assign(titles, cfg.titles);
+        if (cfg.metadata) Object.assign(metadata, cfg.metadata);
+        if (cfg.contentSettings) Object.assign(contentSettings, cfg.contentSettings);
+    }
+});
 
 </script>
 

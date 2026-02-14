@@ -5,9 +5,9 @@
       <view class="sidebar">
         <view class="nav-list">
           <view class="nav-item" :class="{ active: currentTab === 'home' }" @click="currentTab = 'home'">个人首页</view>
-          <view class="nav-item">组卷/讲义</view>
-          <view class="nav-item">标签管理</view>
-          <view class="nav-item" :class="{ active: currentTab === 'fav' }" @click="currentTab = 'fav'">收藏夹</view>
+          <view class="nav-item" :class="{ active: currentTab === 'papers' }" @click="switchTab('papers')">组卷/讲义</view>
+          <view class="nav-item" :class="{ active: currentTab === 'tags' }" @click="switchTab('tags')">标签管理</view>
+          <view class="nav-item" :class="{ active: currentTab === 'fav' }" @click="switchTab('fav')">收藏夹</view>
           <view class="nav-item">我的订单</view>
         </view>
       </view>
@@ -29,7 +29,6 @@
                     >
                         <text class="lv-txt">Lv.{{ user.level || 1 }}</text>
                         <text v-if="(user.level || 1) >= 7" class="bolt-icon">⚡</text>
-                        
                         <view class="xp-detail" v-if="isLevelExpanded">
                             <text class="xp-num">{{ user.xp || 0 }}</text>
                             <text class="xp-sep">/</text>
@@ -62,11 +61,10 @@
                     <text class="stat-num">{{ user.coupons || 0 }}</text>
                     <text class="stat-label">优惠券</text>
                   </view>
-				  <view class="stat-item">
+                  <view class="stat-item">
                     <text class="stat-num text-gold">VIP{{ user.vipLevel || 1 }}</text>
                     <text class="stat-label">等级</text>
                   </view>
-				  
                 </view>
               </view>
               <view class="card-footer-slim">
@@ -255,6 +253,180 @@
           </view>
         </block>
 
+        <block v-else-if="currentTab === 'tags'">
+          <view class="fav-layout">
+            <view class="fav-sidebar">
+              <view class="fav-header">
+                <text class="fav-title">一级分类</text>
+                <view class="add-folder-btn" @click="addLevel1Group" title="新建一级分类">+</view>
+              </view>
+              <scroll-view scroll-y class="folder-list">
+                <view 
+                  v-for="l1 in tagTree" 
+                  :key="l1.id" 
+                  class="folder-item" 
+                  :class="{ active: currentL1Id === l1.id }" 
+                  @click="selectLevel1(l1.id)"
+                >
+                  <text class="f-icon">{{ currentL1Id === l1.id ? '📂' : '📁' }}</text>
+                  <text class="f-name">{{ l1.name }}</text>
+                  <text class="f-count" style="font-size:10px; color:#94a3b8; margin-left:4px;">({{ getL1Count(l1) }})</text>
+                </view>
+              </scroll-view>
+            </view>
+
+            <view class="fav-workspace">
+              <view class="fav-top-bar">
+                <view class="ft-info">
+                    <text class="ft-title">{{ currentL1Name }}</text>
+                    <text class="ft-desc">二级分类管理 & 标签归档 (仅私人空间)</text>
+                </view>
+                <view class="ft-actions">
+                    <view class="h-btn primary" @click="addLevel2Group" v-if="currentL1Id" style="margin-right:10px;">+ 新建二级分类</view>
+                    <block v-if="selectedTags.length > 0">
+                         <view class="h-btn primary outline" @click="openMoveTagModal">移动选中标签 ({{selectedTags.length}})</view>
+                    </block>
+                    <view class="h-btn outline" style="color:#ef4444; border-color:#ef4444; margin-left:10px;" 
+                          v-if="currentL1Id && currentL1Id !== 'L1_DEFAULT'" @click="deleteLevel1">
+                        删除一级分类
+                    </view>
+                </view>
+              </view>
+
+              <scroll-view scroll-y class="fav-scroll-view" style="background:#f8fafc;">
+                <view class="tag-manage-container">
+                    <view v-if="!currentL1Id" class="empty-tip">请选择左侧一级分类</view>
+                    <block v-else>
+                        <view v-for="l2 in currentL2List" :key="l2.id" class="l2-group-card">
+                            <view class="l2-header">
+                                <view class="l2-title-row">
+                                    <text class="l2-icon">📑</text>
+                                    <text class="l2-name">{{ l2.name }}</text>
+                                    <text class="l2-count">({{ getL2Tags(l2.id).length }})</text>
+                                </view>
+                                <view class="l2-ops" v-if="l2.id !== 'L2_DEFAULT'">
+                                    <text class="op-txt" @click="renameLevel2(l2)">重命名</text>
+                                    <text class="op-txt red" @click="deleteLevel2(l2.id)">删除</text>
+                                </view>
+                            </view>
+                            <view class="l2-body">
+                                <view class="tag-grid">
+                                    <view 
+                                        v-for="tag in getL2Tags(l2.id)" 
+                                        :key="tag" 
+                                        class="tag-card small"
+                                        :class="{ selected: selectedTags.includes(tag) }"
+                                        @click="toggleTagSelection(tag)"
+                                    >
+                                        <text class="t-name">{{ tag }}</text>
+                                        <view class="check-circle" v-if="selectedTags.includes(tag)">✓</view>
+                                    </view>
+                                    <view v-if="getL2Tags(l2.id).length === 0" class="no-tags-tip">无标签</view>
+                                </view>
+                            </view>
+                        </view>
+                    </block>
+                </view>
+              </scroll-view>
+            </view>
+          </view>
+        </block>
+        
+        <block v-else-if="currentTab === 'papers'">
+          <view class="fav-layout">
+            <view class="fav-sidebar">
+              <view class="fav-header">
+                <text class="fav-title">试卷分类</text>
+                <view class="add-folder-btn" @click="addPaperL1Group" title="新建分类">+</view>
+              </view>
+              <scroll-view scroll-y class="folder-list">
+                <block v-for="l1 in paperTree" :key="l1.id">
+                    <view 
+                      class="folder-item tree-level-1" 
+                      :class="{ active: currentPaperL1Id === l1.id }" 
+                      @click="togglePaperL1(l1)"
+                    >
+                      <view class="tree-toggle-icon">{{ l1.isOpen ? '▼' : '▶' }}</view>
+                      <text class="f-name">{{ l1.name }}</text>
+                      <text class="f-count">({{ getPaperL1Count(l1) }})</text>
+                    </view>
+                    
+                    <view v-if="l1.isOpen" class="tree-sub-list">
+                        <view 
+                            v-for="l2 in l1.children" 
+                            :key="l2.id"
+                            class="folder-item tree-level-2"
+                            :class="{ active: currentPaperL2Id === l2.id }"
+                            @click.stop="selectPaperL2(l1.id, l2.id)"
+                        >
+                            <text class="f-icon">📂</text>
+                            <text class="f-name">{{ l2.name }}</text>
+                            <text class="f-count">({{ getPaperL2List(l2.id).length }})</text>
+                        </view>
+                    </view>
+                </block>
+              </scroll-view>
+            </view>
+            
+            <view class="fav-workspace">
+                <view class="fav-top-bar">
+                    <view class="ft-info">
+                        <text class="ft-title">
+                            {{ currentPaperL1Name }} 
+                            <text v-if="currentPaperL2Id" style="color:#cbd5e1; margin:0 5px;">/</text> 
+                            {{ currentPaperL2Name }}
+                        </text>
+                        <text class="ft-desc">共 {{ displayPaperList.length }} 份试卷</text>
+                    </view>
+                    <view class="ft-actions">
+                        <view class="h-btn primary" @click="addPaperL2Group" v-if="currentPaperL1Id" style="margin-right:10px;">+ 新建子分类</view>
+                        
+                        <block v-if="currentPaperL2Id && displayPaperList.length > 0">
+                             <view class="h-btn primary outline" @click="openMovePaperModal">批量移动本页试卷</view>
+                        </block>
+                        
+                        <view class="h-btn outline" style="color:#ef4444; border-color:#ef4444; margin-left:10px;" 
+                              v-if="currentPaperL1Id && currentPaperL1Id !== 'PL1_DEFAULT'" @click="deletePaperL1">
+                            删除分类
+                        </view>
+                         <view class="h-btn outline" style="color:#ef4444; border-color:#ef4444; margin-left:10px;" 
+                              v-if="currentPaperL2Id && currentPaperL2Id !== 'PL2_DEFAULT'" @click="deletePaperL2">
+                            删除子分类
+                        </view>
+                    </view>
+                </view>
+
+                <scroll-view scroll-y class="fav-scroll-view" style="background:#f8fafc;">
+                    <view class="cards-container">
+                        <view v-if="!currentPaperL1Id" class="empty-tip">请选择左侧分类查看试卷</view>
+                        <view v-else-if="displayPaperList.length === 0" class="empty-tip">该分类下暂无试卷</view>
+                        
+                        <view v-for="paper in displayPaperList" :key="paper.id" class="paper-card" @click="openPaper(paper)">
+                            <view class="pc-icon" :class="paper.type">
+                                {{ paper.type === 'pdf' ? 'PDF' : 'W' }}
+                            </view>
+                            <view class="pc-content">
+                                <view class="pc-title">{{ paper.title || '未命名试卷' }}</view>
+                                <view class="pc-sub">{{ paper.subTitle }}</view>
+                                <view class="pc-meta">
+                                    <text>{{ paper.updateTime }}</text>
+                                    <text class="pc-sep">|</text>
+                                    <text>{{ paper.questions.length }} 题</text>
+                                    <text class="pc-status" :class="{ ok: paper.status === '已下载' }">{{ paper.status }}</text>
+                                </view>
+                            </view>
+                            <view class="pc-actions">
+                                <view class="h-btn outline primary" style="font-size: 12px; padding: 2px 8px;" @click.stop="moveSinglePaper(paper)">移动</view>
+                                <view class="h-btn outline primary" style="font-size: 12px; padding: 2px 8px; margin-left: 8px;">编辑/下载</view>
+                                <view class="h-btn outline" style="font-size: 12px; padding: 2px 8px; color: #ef4444; border-color: #ef4444; margin-left: 8px;" @click.stop="deletePaper(paper.id)">删除</view>
+                            </view>
+                        </view>
+                    </view>
+                </scroll-view>
+            </view>
+          </view>
+        </block>
+
         <block v-else-if="currentTab === 'fav'">
           <view class="fav-layout">
             <view class="fav-sidebar">
@@ -295,8 +467,8 @@
                         <view class="q-title"><LatexText :text="q.title"></LatexText></view>
                         <view v-if="q.subQuestions && q.subQuestions.length > 0" class="sub-q-list-view">
                           <view v-for="(subQ, sIdx) in q.subQuestions" :key="sIdx" class="sub-q-row">
-                            <view class="sub-q-txt" style="display: flex; align-items: baseline;">
-                              <text style="font-weight:bold; margin-right:5px; flex-shrink: 0;">{{ formatSubIndex(sIdx + 1) }}</text>
+                            <view class="sub-q-txt" style="display: flex; align-items: flex-start;">
+                              <text style="font-weight:bold; margin-right:5px; flex-shrink: 0; margin-top:3px; line-height:1.4;">{{ formatSubIndex(sIdx + 1) }}</text>
                               <view style="flex:1;"><LatexText :text="subQ.content"></LatexText></view>
                             </view>
                             <view v-if="subQ.options && Object.keys(subQ.options).length > 0" class="opt-grid mt-2 sub-indent" :style="'grid-template-columns: repeat(' + (subQ.optionLayout||4) + ', 1fr)'">
@@ -448,21 +620,48 @@
         </view>
       </view>
     </CommonModal>
-
-  </view>
+  
+  </view> <ExportQuestionsModal 
+      v-model:visible="showPdfModal" 
+      :questions="currentEditPaper.questions" 
+      :initData="currentEditPaper" 
+      @save="loadSavedPapers" 
+  />
+  <ExportWordModal 
+      v-model:visible="showWordModal" 
+      :questions="currentEditPaper.questions" 
+      :initData="currentEditPaper" 
+      @save="loadSavedPapers" 
+  />
+  
+  <CommonModal :isOpen="movePaperModalVisible" maxWidth="400px" @close="movePaperModalVisible = false">
+        <template #header>
+            <view class="custom-header">
+                <text class="modal-title">移动试卷到...</text>
+                <view class="win-close-btn" @click="movePaperModalVisible = false">✕</view>
+            </view>
+        </template>
+        <view class="move-tree-scroll">
+            <view class="move-tree-tip">请选择一个目标分类</view>
+            <view v-for="l1 in paperTree" :key="l1.id" class="move-tree-node">
+                <view class="move-l1-row">
+                    <text class="name">{{ l1.name }}</text>
+                </view>
+                <view class="move-l2-container">
+                    <view v-for="l2 in l1.children" :key="l2.id" class="move-l2-item" @click="executeMovePaper(l2.id)">
+                        <text class="icon">↳</text>
+                        <text class="name">{{ l2.name }}</text>
+                    </view>
+                </view>
+            </view>
+        </view>
+    </CommonModal>
 </template>
 
 <script setup>
-  import {
-    ref,
-    reactive,
-    computed,
-    onMounted
-  } from 'vue';
+  import { ref, reactive, computed, onMounted } from 'vue';
   import LatexText from '@/components/LatexText.vue';
-  import {
-    request
-  } from '@/utils/request.js';
+  import { request } from '@/utils/request.js';
   import CommonModal from '@/components/CommonModal.vue';
   import {
     globalConfig,
@@ -471,8 +670,209 @@
     formatSubIndex,
     formatOptionLabel
   } from '../utils/configStore.js';
+  
+  import ExportQuestionsModal from '@/components/ExportQuestionsModal.vue';
+  import ExportWordModal from '@/components/ExportWordModal.vue';
+  
+  // === 组卷/讲义逻辑 (升级版) ===
+    const savedPapers = ref([]);
+    const showPdfModal = ref(false);
+    const showWordModal = ref(false);
+    const currentEditPaper = ref({ questions: [] });
+    
+    // [新增] 试卷分类状态
+    const paperTree = ref([]);
+    const paperMapping = ref({}); 
+    const currentPaperL1Id = ref(null);
+    const currentPaperL2Id = ref(null);
+    const movePaperModalVisible = ref(false);
+    const paperToMoveId = ref(null); 
+  
+    const switchTab = (tab) => {
+        currentTab.value = tab;
+        if (tab === 'tags') initTagData();
+        if (tab === 'papers') initPaperData(); 
+    };
+  
+    // 初始化试卷数据（含分类逻辑）
+    const initPaperData = () => {
+        savedPapers.value = uni.getStorageSync('USER_SAVED_PAPERS') || [];
+        
+        const storedTree = uni.getStorageSync('USER_PAPER_TREE');
+        const storedMap = uni.getStorageSync('USER_PAPER_MAPPING');
+        
+        if (storedTree) {
+            paperTree.value = JSON.parse(storedTree);
+        } else {
+            paperTree.value = [
+                { id: 'PL1_DEFAULT', name: '我的组卷', isOpen: true, children: [{ id: 'PL2_DEFAULT', name: '默认归档' }] }
+            ];
+            uni.setStorageSync('USER_PAPER_TREE', JSON.stringify(paperTree.value));
+        }
+        
+        if (storedMap) paperMapping.value = JSON.parse(storedMap);
+        else paperMapping.value = {};
+        
+        // 自动归档
+        let mapChanged = false;
+        savedPapers.value.forEach(p => {
+            if (!paperMapping.value[p.id]) {
+                paperMapping.value[p.id] = 'PL2_DEFAULT';
+                mapChanged = true;
+            }
+        });
+        if (mapChanged) uni.setStorageSync('USER_PAPER_MAPPING', JSON.stringify(paperMapping.value));
+        
+        if (!currentPaperL1Id.value && paperTree.value.length > 0) {
+            currentPaperL1Id.value = paperTree.value[0].id;
+            currentPaperL2Id.value = paperTree.value[0].children[0].id;
+        }
+    };
+    
+    const currentPaperL1Name = computed(() => {
+        const l1 = paperTree.value.find(i => i.id === currentPaperL1Id.value);
+        return l1 ? l1.name : '';
+    });
+    const currentPaperL2Name = computed(() => {
+        if(!currentPaperL1Id.value) return '';
+        const l1 = paperTree.value.find(i => i.id === currentPaperL1Id.value);
+        if(l1 && currentPaperL2Id.value) {
+            const l2 = l1.children.find(c => c.id === currentPaperL2Id.value);
+            return l2 ? l2.name : '';
+        }
+        return '所有';
+    });
+  
+    const displayPaperList = computed(() => {
+        if (!currentPaperL2Id.value) return [];
+        return savedPapers.value.filter(p => (paperMapping.value[p.id] || 'PL2_DEFAULT') === currentPaperL2Id.value);
+    });
+  
+    const getPaperL1Count = (l1) => {
+        let count = 0;
+        if(l1.children) l1.children.forEach(l2 => count += getPaperL2List(l2.id).length);
+        return count;
+    };
+    const getPaperL2List = (l2Id) => {
+        return savedPapers.value.filter(p => (paperMapping.value[p.id] || 'PL2_DEFAULT') === l2Id);
+    };
+  
+    const togglePaperL1 = (l1) => {
+        if (currentPaperL1Id.value === l1.id) l1.isOpen = !l1.isOpen;
+        else {
+            currentPaperL1Id.value = l1.id;
+            l1.isOpen = true;
+            if(l1.children && l1.children.length > 0) currentPaperL2Id.value = l1.children[0].id;
+        }
+        uni.setStorageSync('USER_PAPER_TREE', JSON.stringify(paperTree.value));
+    };
+    const selectPaperL2 = (l1Id, l2Id) => {
+        currentPaperL1Id.value = l1Id;
+        currentPaperL2Id.value = l2Id;
+    };
+  
+    // --- CRUD (分类管理) ---
+    const addPaperL1Group = () => {
+        uni.showModal({
+            title: '新建一级分类', editable: true, placeholderText: '如：高三复习',
+            success: (res) => {
+                if (res.confirm && res.content) {
+                    paperTree.value.push({
+                        id: 'PL1_' + Date.now(), name: res.content, isOpen: true,
+                        children: [{ id: 'PL2_' + Date.now() + '_def', name: '默认子类' }]
+                    });
+                    uni.setStorageSync('USER_PAPER_TREE', JSON.stringify(paperTree.value));
+                }
+            }
+        });
+    };
+    const addPaperL2Group = () => {
+        uni.showModal({
+            title: '新建子分类', editable: true, placeholderText: '如：摸底考试',
+            success: (res) => {
+                if (res.confirm && res.content) {
+                    const l1 = paperTree.value.find(i => i.id === currentPaperL1Id.value);
+                    if (l1) {
+                        l1.children.push({ id: 'PL2_' + Date.now(), name: res.content });
+                        uni.setStorageSync('USER_PAPER_TREE', JSON.stringify(paperTree.value));
+                    }
+                }
+            }
+        });
+    };
+    const deletePaperL1 = () => {
+        uni.showModal({
+            title: '删除分类', content: '其下所有试卷将移动到默认归档，确定吗？',
+            success: (res) => {
+                if(res.confirm) {
+                    const l1 = paperTree.value.find(i => i.id === currentPaperL1Id.value);
+                    l1.children.forEach(l2 => {
+                        getPaperL2List(l2.id).forEach(p => paperMapping.value[p.id] = 'PL2_DEFAULT');
+                    });
+                    uni.setStorageSync('USER_PAPER_MAPPING', JSON.stringify(paperMapping.value));
+                    
+                    paperTree.value = paperTree.value.filter(i => i.id !== currentPaperL1Id.value);
+                    uni.setStorageSync('USER_PAPER_TREE', JSON.stringify(paperTree.value));
+                    
+                    currentPaperL1Id.value = 'PL1_DEFAULT';
+                    currentPaperL2Id.value = 'PL2_DEFAULT';
+                }
+            }
+        });
+    };
+    const deletePaperL2 = () => {
+          const l1 = paperTree.value.find(i => i.id === currentPaperL1Id.value);
+          l1.children = l1.children.filter(c => c.id !== currentPaperL2Id.value);
+          uni.setStorageSync('USER_PAPER_TREE', JSON.stringify(paperTree.value));
+          currentPaperL2Id.value = l1.children[0]?.id;
+    };
+  
+    const moveSinglePaper = (paper) => {
+        paperToMoveId.value = paper.id;
+        movePaperModalVisible.value = true;
+    };
+    const openMovePaperModal = () => {
+        paperToMoveId.value = null; // 批量模式
+        movePaperModalVisible.value = true;
+    };
+    const executeMovePaper = (targetL2Id) => {
+        if (paperToMoveId.value) {
+            paperMapping.value[paperToMoveId.value] = targetL2Id;
+        } else {
+            displayPaperList.value.forEach(p => paperMapping.value[p.id] = targetL2Id);
+        }
+        uni.setStorageSync('USER_PAPER_MAPPING', JSON.stringify(paperMapping.value));
+        uni.showToast({ title: '移动成功', icon: 'success' });
+        movePaperModalVisible.value = false;
+    };
+  
+    const loadSavedPapers = () => {
+        initPaperData();
+    };
+  
+    const openPaper = (paper) => {
+        currentEditPaper.value = paper;
+        if (paper.type === 'pdf') showPdfModal.value = true;
+        else showWordModal.value = true;
+    };
+  
+    const deletePaper = (id) => {
+        uni.showModal({
+            title: '删除试卷', content: '确定删除吗？',
+            success: (res) => {
+                if (res.confirm) {
+                    let papers = uni.getStorageSync('USER_SAVED_PAPERS') || [];
+                    papers = papers.filter(p => p.id !== id);
+                    uni.setStorageSync('USER_SAVED_PAPERS', papers);
+                    delete paperMapping.value[id];
+                    uni.setStorageSync('USER_PAPER_MAPPING', JSON.stringify(paperMapping.value));
+                    
+                    initPaperData(); 
+                }
+            }
+        });
+    };
 
-  // 定义默认的初始数据结构
   const defaultUser = {
     nickname: 'Admin',
     signature: '生活不止眼前的苟且，还有诗和远方的田野，更有写不完的代码和改不完的Bug。',
@@ -482,7 +882,7 @@
     coupons: 5,
     vipLevel: 1,
     avatar: '',
-    gender: 0, // 0:保密, 1:男, 2:女
+    gender: 0, 
     birthDate: '2000-01-01',
     school: '清华大学'
   };
@@ -491,57 +891,39 @@
   
   const isLevelExpanded = ref(false);
     const toggleLevel = () => { isLevelExpanded.value = !isLevelExpanded.value; };
-    
-    // 与后端保持一致的经验阈值
     const LEVEL_THRESHOLDS_CFG = [0, 5000, 20000, 80000, 200000, 400000, 600000];
-    
     const nextLevelXP = computed(() => {
         const lv = user.value.level || 1;
-        if (lv >= 7) return 'MAX'; // 满级
-        return LEVEL_THRESHOLDS_CFG[lv]; // Lv 1 的下一级阈值是 index 1 (5000)
+        if (lv >= 7) return 'MAX';
+        return LEVEL_THRESHOLDS_CFG[lv]; 
     });
 
-  // 【核心修改 2】修改初始化逻辑，读取真实字段
   const initUserProfile = () => {
-      // 1. 读取【登录接口】存入的真实数据（这里面有后端返回的正确 UID 和 邀请码）
       const loginInfo = uni.getStorageSync('user') || {}; 
-      
-      // 2. 读取【个人中心】之前保存的缓存（可能包含头像等本地临时修改）
       let storedProfile = uni.getStorageSync('USER_PROFILE_DATA');
       let profileData = storedProfile ? JSON.parse(storedProfile) : {};
   
-      // 3. 合并数据：优先级是 登录真实数据 > 本地缓存 > 默认值
       user.value = {
-        ...defaultUser,     // 垫底的默认值
-        ...profileData,     // 中间层的本地缓存
-        
-        // === 强制使用登录时的真实数据覆盖 ===
-        username: loginInfo.username, // 用户名
+        ...defaultUser,
+        ...profileData,
+        username: loginInfo.username,
         nickname: loginInfo.nickname || profileData.nickname || defaultUser.nickname,
-        uid: loginInfo.uid || '未登录',              // 【关键】使用后端返回的真实UID
-        inviteCode: loginInfo.inviteCode || '----',  // 【关键】使用后端返回的真实邀请码
+        uid: loginInfo.uid || '未登录',
+        inviteCode: loginInfo.inviteCode || '----',
         role: loginInfo.role,
-        boundInviteCode: loginInfo.boundInviteCode || '', // 绑定的邀请码
-        
-        // --- [新增] 等级字段 ---
+        boundInviteCode: loginInfo.boundInviteCode || '',
         level: loginInfo.level || 1,
         xp: loginInfo.xp || 0,
-        
-        // --- [新增] 读取会员字段 ---
         vipType: loginInfo.vipType || 'none',
         vipExpiry: loginInfo.vipExpiry || null,
 		vipLevel: loginInfo.vipLevel || 1,
         vipXp: loginInfo.vipXp || 0,
-
-        // 其他字段如果登录时也返回了，最好也加上
         avatar: loginInfo.avatar || profileData.avatar || '',
         signature: loginInfo.signature || profileData.signature || '',
         gender: loginInfo.gender !== undefined ? loginInfo.gender : (profileData.gender || 0),
         birthDate: loginInfo.birthDate || profileData.birthDate || '2000-01-01',
         school: loginInfo.school || profileData.school || ''
       };
-      
-      // 4. 刷新一下本地缓存，确保持久化
       uni.setStorageSync('USER_PROFILE_DATA', JSON.stringify(user.value));
     };
 
@@ -555,7 +937,240 @@
   const favQuestions = ref([]);
   const showAnswerMap = ref({});
 
-  // --- 编辑功能相关逻辑 ---
+  // === 3. 标签管理相关状态 (新版二级结构) ===
+  const tagTree = ref([]); 
+  const tagMapping = ref({}); 
+  const currentL1Id = ref(null);
+  const allUserTags = ref([]); 
+  const selectedTags = ref([]); 
+
+  const initTagData = async () => {
+      const storedTree = uni.getStorageSync('USER_TAG_TREE_DATA');
+      const storedMapping = uni.getStorageSync('USER_TAG_MAPPING_V2');
+      
+      if (storedTree) {
+          tagTree.value = JSON.parse(storedTree);
+      } else {
+          tagTree.value = [
+              { 
+                  id: 'L1_DEFAULT', 
+                  name: '默认分类', 
+                  children: [
+                      { id: 'L2_DEFAULT', name: '未归档' }
+                  ] 
+              }
+          ];
+          uni.setStorageSync('USER_TAG_TREE_DATA', JSON.stringify(tagTree.value));
+      }
+
+      if (storedMapping) tagMapping.value = JSON.parse(storedMapping);
+      else tagMapping.value = {};
+
+      if (!currentL1Id.value && tagTree.value.length > 0) {
+          currentL1Id.value = tagTree.value[0].id;
+      }
+
+      try {
+        const res = await request({ url: '/api/questions', method: 'GET', data: { mode: 'private' } });
+        const qList = res.data || [];
+        const foundTags = new Set();
+        
+        qList.forEach(q => {
+            if (q.tags && Array.isArray(q.tags)) {
+                q.tags.forEach(t => { if(t) foundTags.add(t); });
+            }
+            if (q.subQuestions) {
+                q.subQuestions.forEach(sq => {
+                    if (sq.tags && Array.isArray(sq.tags)) {
+                        sq.tags.forEach(t => { if(t) foundTags.add(t); });
+                    }
+                });
+            }
+        });
+        
+        allUserTags.value = Array.from(foundTags);
+        
+        let mappingChanged = false;
+        allUserTags.value.forEach(t => {
+            if (!tagMapping.value[t]) {
+                tagMapping.value[t] = 'L2_DEFAULT'; 
+                mappingChanged = true;
+            }
+        });
+        
+        if (mappingChanged) {
+            uni.setStorageSync('USER_TAG_MAPPING_V2', JSON.stringify(tagMapping.value));
+        }
+        
+      } catch (e) {
+          console.error('标签同步失败', e);
+      }
+      
+      selectedTags.value = [];
+  };
+  
+  const currentL1Name = computed(() => {
+      const l1 = tagTree.value.find(item => item.id === currentL1Id.value);
+      return l1 ? l1.name : '未选择';
+  });
+
+  const currentL2List = computed(() => {
+      const l1 = tagTree.value.find(item => item.id === currentL1Id.value);
+      return l1 ? l1.children : [];
+  });
+
+  const getL1Count = (l1) => {
+      if (!l1 || !l1.children) return 0;
+      let count = 0;
+      l1.children.forEach(l2 => {
+          count += getL2Tags(l2.id).length;
+      });
+      return count;
+  };
+
+  const getL2Tags = (l2Id) => {
+      return allUserTags.value.filter(t => (tagMapping.value[t] || 'L2_DEFAULT') === l2Id);
+  };
+
+  const selectLevel1 = (id) => {
+      currentL1Id.value = id;
+      selectedTags.value = [];
+  };
+
+  const addLevel1Group = () => {
+      uni.showModal({
+          title: '新建一级分类',
+          editable: true,
+          placeholderText: '例如：按学科、按年份',
+          success: (res) => {
+              if (res.confirm && res.content) {
+                  tagTree.value.push({ 
+                      id: 'L1_' + Date.now(), 
+                      name: res.content,
+                      children: [] 
+                  });
+                  uni.setStorageSync('USER_TAG_TREE_DATA', JSON.stringify(tagTree.value));
+              }
+          }
+      });
+  };
+
+  const addLevel2Group = () => {
+      if (!currentL1Id.value) return;
+      uni.showModal({
+          title: '新建二级分类',
+          editable: true,
+          placeholderText: '例如：数学、物理、2023年',
+          success: (res) => {
+              if (res.confirm && res.content) {
+                  const l1 = tagTree.value.find(i => i.id === currentL1Id.value);
+                  if (l1) {
+                      l1.children.push({
+                          id: 'L2_' + Date.now(),
+                          name: res.content
+                      });
+                      uni.setStorageSync('USER_TAG_TREE_DATA', JSON.stringify(tagTree.value));
+                  }
+              }
+          }
+      });
+  };
+
+  const deleteLevel1 = () => {
+      if (currentL1Id.value === 'L1_DEFAULT') return uni.showToast({ title: '默认分类不可删除', icon: 'none' });
+      
+      uni.showModal({
+          title: '删除一级分类',
+          content: '该操作会将此类目下所有标签移动到“默认分类-未归档”，确定删除吗？',
+          success: (res) => {
+              if (res.confirm) {
+                  const l1 = tagTree.value.find(i => i.id === currentL1Id.value);
+                  if (l1 && l1.children) {
+                      l1.children.forEach(l2 => {
+                          const tags = getL2Tags(l2.id);
+                          tags.forEach(t => tagMapping.value[t] = 'L2_DEFAULT');
+                      });
+                  }
+                  uni.setStorageSync('USER_TAG_MAPPING_V2', JSON.stringify(tagMapping.value));
+                  
+                  tagTree.value = tagTree.value.filter(i => i.id !== currentL1Id.value);
+                  uni.setStorageSync('USER_TAG_TREE_DATA', JSON.stringify(tagTree.value));
+                  
+                  currentL1Id.value = 'L1_DEFAULT';
+                  uni.showToast({ title: '已删除并迁移', icon: 'none' });
+              }
+          }
+      });
+  };
+
+  const renameLevel2 = (l2) => {
+       uni.showModal({
+          title: '重命名',
+          editable: true,
+          content: l2.name,
+          success: (res) => {
+              if (res.confirm && res.content) {
+                  l2.name = res.content;
+                  uni.setStorageSync('USER_TAG_TREE_DATA', JSON.stringify(tagTree.value));
+              }
+          }
+       });
+  };
+
+  const deleteLevel2 = (l2Id) => {
+      uni.showModal({
+          title: '删除二级分类',
+          content: '该分类下的标签将移动到“未归档”，确定吗？',
+          success: (res) => {
+              if (res.confirm) {
+                  const tags = getL2Tags(l2Id);
+                  tags.forEach(t => tagMapping.value[t] = 'L2_DEFAULT');
+                  uni.setStorageSync('USER_TAG_MAPPING_V2', JSON.stringify(tagMapping.value));
+                  
+                  const l1 = tagTree.value.find(i => i.id === currentL1Id.value);
+                  if (l1) {
+                      l1.children = l1.children.filter(sub => sub.id !== l2Id);
+                      uni.setStorageSync('USER_TAG_TREE_DATA', JSON.stringify(tagTree.value));
+                  }
+                  uni.showToast({ title: '已删除', icon: 'none' });
+              }
+          }
+      });
+  };
+
+  const toggleTagSelection = (tag) => {
+      if (selectedTags.value.includes(tag)) {
+          selectedTags.value = selectedTags.value.filter(t => t !== tag);
+      } else {
+          selectedTags.value.push(tag);
+      }
+  };
+
+  const openMoveTagModal = () => {
+      const flatOptions = [];
+      const flatIds = [];
+      
+      tagTree.value.forEach(l1 => {
+          l1.children.forEach(l2 => {
+              flatOptions.push(`${l1.name} / ${l2.name}`);
+              flatIds.push(l2.id);
+          });
+      });
+
+      uni.showActionSheet({
+          itemList: flatOptions,
+          success: (res) => {
+              const targetL2Id = flatIds[res.tapIndex];
+              selectedTags.value.forEach(t => {
+                  tagMapping.value[t] = targetL2Id;
+              });
+              uni.setStorageSync('USER_TAG_MAPPING_V2', JSON.stringify(tagMapping.value));
+              uni.showToast({ title: '移动成功', icon: 'none' });
+              selectedTags.value = [];
+          }
+      });
+  };
+
   const editVisible = ref(false);
   const editForm = ref({});
 
@@ -585,7 +1200,6 @@
     });
   };
 
-  // 工具函数：计算字符串长度
   const getStrLen = (str) => {
     let len = 0;
     for (let i = 0; i < str.length; i++) {
@@ -594,11 +1208,8 @@
     return len;
   };
 
-  // 【核心修改 3】保存信息 (含头像上传和接口调用)
   const saveInfo = async () => {
     const newNick = editForm.value.nickname || '';
-
-    // A. 前端校验
     if (!newNick.trim()) return uni.showToast({ title: '昵称不能为空', icon: 'none' });
     if (!/^[\u4e00-\u9fa5a-zA-Z0-9]+$/.test(newNick)) return uni.showToast({ title: '昵称不能含特殊符号', icon: 'none' });
     if (getStrLen(newNick) > 12) return uni.showToast({ title: '昵称过长', icon: 'none' });
@@ -606,7 +1217,6 @@
     uni.showLoading({ title: '保存中...' });
 
     try {
-      // B. 头像上传逻辑
       let finalAvatarUrl = editForm.value.avatar;
       const isLocalFile = finalAvatarUrl && (finalAvatarUrl.startsWith('blob:') || finalAvatarUrl.startsWith('file://') || finalAvatarUrl.includes('tmp'));
 
@@ -627,7 +1237,6 @@
       }
       editForm.value.avatar = finalAvatarUrl;
 
-      // C. 提交更新到后端
       const res = await request({
         url: '/api/user/update',
         method: 'POST',
@@ -636,14 +1245,12 @@
 
       uni.hideLoading();
 
-      // D. 更新成功，同步数据
       if (res.user) {
           user.value = {
               ...user.value,
               ...res.user,
               nickname: res.user.nickname || user.value.nickname,
               avatar: res.user.avatar,
-              // 同步所有新字段
               signature: res.user.signature,
               gender: res.user.gender,
               birthDate: res.user.birthDate,
@@ -654,7 +1261,6 @@
           user.value = { ...user.value, ...editForm.value };
       }
 
-      // E. 更新本地缓存 & 登录缓存
       uni.setStorageSync('USER_PROFILE_DATA', JSON.stringify(user.value));
       
       const loginUser = uni.getStorageSync('user') || {};
@@ -789,6 +1395,7 @@
       const type = currentVipType.value;
       if (type === 'blackgold') return 'role-blackgold';
       if (type === 'diamond') return 'role-diamond';
+      if (type === 'svip') return 'role-svip'; // [新增] 修复：支持机构会员
       return 'role-regular'; 
   });
 
@@ -937,17 +1544,19 @@
     flex: 1.4;
     position: relative;
     background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
+    border-color: #e2e8f0;
   }
   
-  /* 钻石会员 */
+  /* 钻石会员 (蓝色系) */
   .info-card.role-diamond {
       flex: 1.4;
       position: relative;
       background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
       border-color: #bfdbfe;
+      color: #1e3a8a; /* 深蓝文字 */
   }
   
-  /* 黑金会员 */
+  /* 黑金会员 (黑金系) */
   .info-card.role-blackgold {
       flex: 1.4;
       position: relative;
@@ -955,16 +1564,37 @@
       color: #fbbf24;
       border-color: #451a03;
   }
-  /* 黑金会员下的文字颜色调整 */
+  /* 黑金会员下的文字颜色强制适配 */
   .info-card.role-blackgold .nickname,
-  .info-card.role-blackgold .stat-num,
-  .info-card.role-blackgold .label-text {
+  .info-card.role-blackgold .stat-num {
       color: #fbbf24 !important;
   }
   .info-card.role-blackgold .signature,
   .info-card.role-blackgold .stat-label,
   .info-card.role-blackgold .id-tag {
-      color: #cbd5e1 !important;
+      color: #94a3b8 !important; /* 浅灰紫色，在黑底上更清晰 */
+  }
+
+  /* [新增] 机构尊享版 (紫色极光系) */
+  .info-card.role-svip {
+      flex: 1.4;
+      position: relative;
+      background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+      color: white;
+      border-color: #6d28d9;
+  }
+  /* 机构版文字适配 */
+  .info-card.role-svip .nickname,
+  .info-card.role-svip .stat-num,
+  .info-card.role-svip .signature,
+  .info-card.role-svip .id-tag,
+  .info-card.role-svip .stat-label {
+      color: white !important;
+      opacity: 0.95;
+  }
+  .info-card.role-svip .level-badge {
+      background: rgba(255,255,255,0.2) !important;
+      border-color: rgba(255,255,255,0.4) !important;
   }
 
   .card-bg-decoration {
@@ -1161,33 +1791,40 @@
   .preview-scroll-view { position: absolute; top: 40px; bottom: 0; left: 0; right: 0; width: 100%; box-sizing: border-box; }
   .cards-container { padding: 20px; display: flex; flex-direction: column; gap: 15px; width: 100%; box-sizing: border-box; max-width: 1200px; margin: 0 auto; }
 
-  /* 5. 题库卡片样式 */
+  /* =========================================
+     5. 题库卡片样式 (关键！这里控制对齐)
+     ========================================= */
   .q-card { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin-bottom: 0; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05); font-family: "Times New Roman", "SimSun", "Songti SC", serif; width: 100%; box-sizing: border-box; }
   .q-header { display: flex; justify-content: space-between; font-size: 12px; color: #64748b; margin-bottom: 12px; }
   .meta-left { display: flex; gap: 6px; flex-wrap: wrap; }
   .info-chip { padding: 2px 8px; border-radius: 4px; background: #f1f5f9; color: #64748b; font-size: 11px; display: flex; align-items: center; white-space: nowrap; &.type { color: #2563eb; background: #eff6ff; font-weight: bold; } &.diff { color: #f59e0b; background: #fffbeb; } &.prov { background: #f0fdf4; color: #166534; } &.year { background: #eef2ff; color: #4338ca; } &.num { font-family: monospace; } &.source { background: #fff1f2; color: #e11d48; } }
   .q-body { color: #1e293b; cursor: default; }
-  .q-title { margin-bottom: 8px; display: flex; align-items: baseline; word-break: break-all; white-space: normal; }
-  .q-idx { font-weight: bold; margin-right: 8px; flex-shrink: 0; }
+  
+  /* 修复上下错位的核心代码：确保基线对齐 */
+  .q-title { margin-bottom: 8px; display: flex; align-items: flex-start; word-break: break-all; white-space: normal; }
+  .q-idx { font-weight: bold; margin-right: 8px; flex-shrink: 0; margin-top: 3px; line-height: 1.4; }
   .opt-list { display: flex; flex-direction: column; }
-  .opt-item { display: flex; align-items: baseline; }
-  .opt-key { font-weight: bold; margin-right: 8px; flex-shrink: 0; color: #334155; }
+  .opt-item { display: flex; align-items: flex-start; }
+  .opt-key { font-weight: bold; margin-right: 8px; flex-shrink: 0; color: #334155; margin-top: 3px; line-height: 1.4; }
   .opt-val { color: #334155; word-break: break-all; flex: 1; }
+  
   .sub-q-list-view { margin-top: 12px; border-top: 1px dashed #e2e8f0; padding-top: 12px; }
   .sub-q-row { margin-bottom: 12px; }
-  .sub-q-txt { display: flex; align-items: baseline; margin-bottom: 4px; }
-  .sub-idx { font-weight: bold; margin-right: 6px; flex-shrink: 0; color: #334155; }
+  .sub-q-txt { display: flex; align-items: flex-start; margin-bottom: 4px; }
+  .sub-idx { font-weight: bold; margin-right: 6px; flex-shrink: 0; color: #334155; margin-top: 3px; line-height: 1.4; }
   .sub-content { flex: 1; }
   .sub-indent { margin-left: 22px; margin-top: 4px; }
   .mt-2 { margin-top: 12px; }
+  
   .answer-box { background: #f0f9ff; padding: 12px 15px; border-radius: 6px; border: 1px dashed #bae6fd; color: #0c4a6e; }
-  .ans-block { margin-bottom: 0.8em; display: flex; align-items: baseline; }
+  .ans-block { margin-bottom: 0.8em; display: flex; align-items: flex-start; }
   .ans-block:last-child { margin-bottom: 0; }
-  .ans-tag { display: inline-block; padding: 2px 8px; border-radius: 4px; color: white; font-size: 0.9em; font-weight: bold; margin-right: 8px; flex-shrink: 0; line-height: 1.2 !important; }
+  .ans-tag { display: inline-block; padding: 2px 8px; border-radius: 4px; color: white; font-size: 0.9em; font-weight: bold; margin-right: 8px; flex-shrink: 0; line-height: 1.2 !important; margin-top: 2px; }
   .ans-tag.answer { background-color: #2563eb; }
   .ans-tag.analysis { background-color: #f59e0b; }
   .ans-tag.detailed { background-color: #10b981; }
   .ans-content { color: #334155; word-break: break-all; }
+  
   .q-footer { border-top: 1px solid #f1f5f9; margin-top: 12px; padding-top: 8px; display: flex; justify-content: space-between; align-items: center; }
   .tags-row { display: flex; gap: 8px; align-items: center; flex: 1; flex-wrap: wrap; }
   .tag-badge { font-size: 11px; padding: 2px 6px; border-radius: 4px; display: flex; align-items: center; line-height: 1.2; white-space: nowrap; &.red { background: #fef2f2; color: #ef4444; border: 1px solid #fee2e2; } &.blue { background: #eff6ff; color: #3b82f6; border: 1px solid #dbeafe; } }
@@ -1196,14 +1833,22 @@
   .hash-code { font-family: monospace; color: #cbd5e1; font-size: 11px; }
   .basket-add-btn-rect { padding: 4px 10px; border-radius: 4px; border: 1px solid #2563eb; color: #2563eb; font-size: 11px; cursor: pointer; transition: all 0.2s; font-weight: 500; background: white; white-space: nowrap; &:hover { background: #eff6ff; } }
 
-  /* 收藏夹布局 */
+  /* 收藏夹布局 (也用于标签管理) */
   .fav-layout { display: flex; width: 100%; height: 100%; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; background: white; min-height: 0; }
   .fav-sidebar { width: 220px; border-right: 1px solid #e2e8f0; position: relative; background: #f8fafc; flex-shrink: 0; display: block; }
   .fav-header { height: 50px; display: flex; align-items: center; justify-content: space-between; padding: 0 15px; border-bottom: 1px solid #e2e8f0; background: white; position: absolute; top: 0; left: 0; width: 100%; z-index: 10; box-sizing: border-box; }
   .fav-title { font-weight: bold; color: #334155; font-size: 14px; }
   .add-folder-btn { width: 24px; height: 24px; border-radius: 4px; background: #eff6ff; color: #2563eb; display: flex; align-items: center; justify-content: center; font-size: 16px; cursor: pointer; }
   .folder-list { position: absolute; top: 50px; bottom: 0; left: 0; right: 0; padding: 10px; box-sizing: border-box; overflow-y: auto; }
-  .folder-item { display: flex; align-items: center; padding: 10px; border-radius: 6px; cursor: pointer; color: #64748b; font-size: 13px; margin-bottom: 4px; &:hover { background: #e2e8f0; } &.active { background: #eff6ff; color: #2563eb; font-weight: bold; } }
+  .folder-item { display: flex; align-items: center; padding: 10px; border-radius: 6px; cursor: pointer; color: #64748b; font-size: 13px; margin-bottom: 4px; transition: all 0.2s; &:hover { background: #e2e8f0; } &.active { background: #eff6ff; color: #2563eb; font-weight: bold; } }
+  
+  /* 树形菜单样式 */
+  .tree-level-1 { font-weight: 600; color: #334155; }
+  .tree-toggle-icon { width: 20px; font-size: 10px; color: #94a3b8; text-align: center; }
+  .tree-sub-list { margin-left: 20px; border-left: 1px solid #e2e8f0; padding-left: 5px; }
+  .tree-level-2 { font-size: 12px; padding: 8px 10px; color: #64748b; margin-bottom: 2px; }
+  .tree-level-2 .f-icon { font-size: 12px; opacity: 0.5; margin-right: 6px; }
+
   .f-icon { margin-right: 8px; font-size: 14px; }
   .f-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .fav-workspace { flex: 1; min-width: 0; background: #f1f5f9; position: relative; display: block; }
@@ -1218,10 +1863,46 @@
   .op-btn.red { color: #ef4444; }
   .sidebar, .fav-sidebar, .avatar-wrap, .role-badge, .tag-icon, .f-icon, .info-chip, .tag-badge, .op-btn, .fav-header, .check-icon, .radio-btn { flex-shrink: 0 !important; }
 
+  /* 标签管理新增样式 - 适配二级结构 */
+  .ft-info { display: flex; flex-direction: column; gap: 2px; }
+  .ft-actions { display: flex; align-items: center; }
+  .tag-manage-container { padding: 20px; }
+  .empty-tip { text-align: center; color: #94a3b8; margin-top: 50px; }
+  
+  /* 二级分类卡片 */
+  .l2-group-card { background: white; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 15px; overflow: hidden; }
+  .l2-header { background: #f8fafc; padding: 10px 15px; border-bottom: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center; }
+  .l2-title-row { display: flex; align-items: center; gap: 8px; }
+  .l2-icon { font-size: 14px; }
+  .l2-name { font-weight: bold; font-size: 14px; color: #334155; }
+  .l2-count { color: #94a3b8; font-size: 12px; }
+  .l2-ops { display: flex; gap: 10px; }
+  .op-txt { font-size: 11px; color: #64748b; cursor: pointer; &:hover { color: #2563eb; } }
+  .op-txt.red { &:hover { color: #ef4444; } }
+  .l2-body { padding: 15px; }
+
+  .tag-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 10px; }
+  .tag-card {
+      background: white; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 12px;
+      display: flex; align-items: center; justify-content: space-between; cursor: pointer;
+      position: relative; transition: all 0.2s;
+  }
+  .tag-card.small { padding: 6px 10px; font-size: 12px; }
+  .tag-card:hover { border-color: #94a3b8; }
+  .tag-card.selected { border-color: #2563eb; background: #eff6ff; color: #2563eb; font-weight: bold; }
+  .t-name { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .check-circle { 
+      width: 16px; height: 16px; background: #2563eb; border-radius: 50%; color: white;
+      font-size: 10px; display: flex; align-items: center; justify-content: center;
+      position: absolute; top: -5px; right: -5px;
+  }
+  .no-tags-tip { font-size: 12px; color: #cbd5e1; grid-column: 1 / -1; text-align: center; padding: 10px 0; font-style: italic; }
+
   /* 6. 弹窗样式 */
   .custom-header { display: flex; justify-content: space-between; align-items: center; padding: 15px 25px; border-bottom: 1px solid #f1f5f9; background: #fff; flex-shrink: 0; min-height: 60px; box-sizing: border-box; }
   .modal-title { font-weight: 800; font-size: 15px; color: #0f172a; letter-spacing: -0.5px; line-height: 1; margin: 0; }
   .header-actions { display: flex; gap: 12px; align-items: center; }
+  .win-close-btn { width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #94a3b8; border-radius: 4px; &:hover { background: #e2e8f0; color: #ef4444; } }
   .h-btn { height: 24px; padding: 0 13px; border-radius: 4px; font-size: 13px; cursor: pointer; background: #f1f5f9; color: #64748b; font-weight: 600; display: flex; align-items: center; justify-content: center; transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); box-sizing: border-box; border: 1px solid transparent; &:hover { background: #e2e8f0; transform: translateY(-1px); } &:active { transform: translateY(0); } &.primary { background: #2563eb; color: white; box-shadow: 0 2px 5px rgba(37, 99, 235, 0.2); &:hover { background: #1d4ed8; box-shadow: 0 4px 10px rgba(37, 99, 235, 0.3); } } &.outline { background: transparent; border-color: #2563eb; color: #2563eb; &:hover { background: #eff6ff; border-color: #1d4ed8; color: #1d4ed8; } } }
   .edit-content-scroll { padding: 30px 40px; max-height: 70vh; overflow-y: auto; &::-webkit-scrollbar { width: 6px; } &::-webkit-scrollbar-track { background: transparent; } &::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 3px; &:hover { background-color: #94a3b8; } } }
   .avatar-edit-section { display: flex; flex-direction: column; align-items: center; margin-bottom: 35px; }
@@ -1268,4 +1949,46 @@
   .bind-input[disabled] { background: #f1f5f9; color: #94a3b8; border-color: #e2e8f0; }
   .lock-icon { position: absolute; right: 8px; font-size: 12px; }
   .bind-tip { font-size: 11px; color: #10b981; margin-top: 4px; margin-left: 4px; }
+
+  /* 移动弹窗树形结构样式 */
+  .move-tree-scroll { max-height: 300px; overflow-y: auto; padding: 10px; }
+  .move-tree-tip { font-size: 12px; color: #94a3b8; text-align: center; margin-bottom: 10px; }
+  .move-tree-node { margin-bottom: 5px; }
+  .move-l1-row { display: flex; align-items: center; padding: 8px; background: #f8fafc; border-radius: 4px; cursor: pointer; }
+  .move-l1-row:hover { background: #eff6ff; }
+  .move-l1-row .arrow { width: 20px; font-size: 10px; color: #94a3b8; }
+  .move-l1-row .name { font-weight: bold; font-size: 13px; color: #334155; }
+  .move-l2-container { margin-left: 20px; border-left: 1px solid #e2e8f0; padding-left: 5px; margin-top: 4px; }
+  .move-l2-item { padding: 6px 10px; cursor: pointer; display: flex; align-items: center; border-radius: 4px; }
+  .move-l2-item:hover { background: #e2e8f0; color: #2563eb; }
+  .move-l2-item .icon { font-size: 12px; margin-right: 6px; opacity: 0.5; }
+  .move-l2-item .name { font-size: 13px; }
+  .move-empty { font-size: 11px; color: #cbd5e1; padding: 5px 10px; font-style: italic; }
+  
+  /* 试卷列表卡片样式 */
+  .paper-card {
+      background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 15px; margin-bottom: 12px;
+      display: flex; align-items: center; gap: 15px; cursor: pointer; transition: all 0.2s;
+      &:hover { border-color: #94a3b8; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+  }
+  .pc-icon {
+      width: 48px; height: 48px; border-radius: 8px; display: flex; align-items: center; justify-content: center;
+      font-weight: 800; font-size: 14px; color: white; flex-shrink: 0;
+      &.pdf { background: #ef4444; }
+      &.word { background: #2563eb; }
+  }
+  .pc-content { flex: 1; min-width: 0; }
+  .pc-title { font-weight: bold; font-size: 15px; color: #1e293b; margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pc-sub { font-size: 12px; color: #64748b; margin-bottom: 6px; }
+  .pc-meta { display: flex; align-items: center; gap: 8px; font-size: 11px; color: #94a3b8; }
+  .pc-sep { color: #cbd5e1; }
+  .pc-status { 
+      background: #f1f5f9; padding: 1px 6px; border-radius: 4px; color: #64748b;
+      &.ok { background: #dcfce7; color: #166534; }
+  }
+  .pc-actions { display: flex; align-items: center; }
+  
+  .folder-item .f-count {
+      font-size: 10px; color: #94a3b8; margin-left: auto; /* 让数字靠右 */
+  }
 </style>
