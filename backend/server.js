@@ -483,7 +483,7 @@ app.post('/api/smart-ocr', authenticateToken, upload.single('file'), async (req,
 // === 数据库 & 业务接口 ===
 // ==========================================
 
-// 【修改点】新增 uid 和 inviteCode 字段
+// 【修改点】包含所有字段 (基础信息 + 等级 + 会员 + VIP等级)
 const UserSchema = new mongoose.Schema({
     username: { type: String, required: true, unique: true },
     password: { type: String, required: true },
@@ -497,7 +497,24 @@ const UserSchema = new mongoose.Schema({
     gender: { type: Number, default: 0 },
     birthDate: String,
     school: String,
-    boundInviteCode: String 
+    boundInviteCode: String,
+    
+    // --- 普通等级系统 (活跃度) ---
+    xp: { type: Number, default: 0 },
+    level: { type: Number, default: 1 },
+    dailyStats: {
+        date: String,
+        inputCount: { type: Number, default: 0 },
+        totalXP: { type: Number, default: 0 }
+    },
+    
+    // --- 会员体系 ---
+    vipType: { type: String, default: 'none' }, // none, diamond, blackgold
+    vipExpiry: { type: Date },
+    
+    // --- [恢复并新增] VIP 荣誉等级 (长期积累) ---
+    vipLevel: { type: Number, default: 1 }, // VIP1 - VIP12
+    vipXp: { type: Number, default: 0 }     // VIP 经验池
 });
 
 const baseFields = {
@@ -531,6 +548,128 @@ const User = mongoose.model('User', UserSchema);
 const Subject = mongoose.model('Subject', SubjectSchema);
 const Category = mongoose.model('Category', CategorySchema);
 const Question = mongoose.model('Question', QuestionSchema);
+
+// --- 普通等级配置 (3年满级) ---
+const LEVEL_THRESHOLDS = [0, 5000, 20000, 80000, 200000, 400000, 600000];
+
+// --- [新增] VIP等级配置 (10年满级) ---
+// 目标：黑金会员(10点/天) 需 3650天 达到满级 => 总经验约 36500
+const VIP_THRESHOLDS = [
+    0,      // VIP 1
+    300,    // VIP 2 (黑金30天)
+    1000,   // VIP 3 (黑金3个月)
+    2500,   // VIP 4
+    5000,   // VIP 5
+    8500,   // VIP 6
+    13000,  // VIP 7 (黑金3.5年)
+    18000,  // VIP 8
+    23500,  // VIP 9
+    29500,  // VIP 10
+    36000,  // VIP 11 (黑金10年略差一点点)
+    45000   // VIP 12 (顶级荣耀)
+];
+
+const XP_RULES = {
+    // 普通经验 (活跃度)
+    LOGIN: 50,           
+    LOGIN_DIAMOND: 100,  
+    LOGIN_BLACKGOLD: 200,
+    INPUT: 30,           
+    FAV: 10,             
+    DAILY_INPUT_MAX: 10, 
+    DAILY_XP_CAP: 1000,
+
+    // [新增] VIP经验 (仅会员登录获取)
+    VIP_LOGIN_DIAMOND: 5,   // 钻石每日 +5
+    VIP_LOGIN_BLACKGOLD: 10 // 黑金每日 +10
+};
+
+// --- [新增] 经验值处理核心逻辑 ---
+const addExperience = async (userId, type) => {
+    const user = await User.findById(userId);
+    if (!user) return null;
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    
+    // 1. 检查是否需要重置每日统计
+    if (!user.dailyStats || user.dailyStats.date !== todayStr) {
+        user.dailyStats = { date: todayStr, inputCount: 0, totalXP: 0 };
+    }
+
+    // 2. 检查每日总上限
+    if (user.dailyStats.totalXP >= XP_RULES.DAILY_XP_CAP) return user;
+
+    let xpGain = 0;
+
+    // 3. 根据类型计算经验
+    if (type === 'login') {
+        // 每日首次交互(登录)才加分
+        if (user.dailyStats.totalXP === 0) {
+            // A. 计算普通活跃经验
+            let loginXP = XP_RULES.LOGIN;
+            let vipDailyGain = 0; // VIP经验增量
+
+            const now = new Date();
+            if (user.vipType && user.vipType !== 'none' && user.vipExpiry) {
+                // 检查会员是否过期
+                if (new Date(user.vipExpiry) > now) {
+                    if (user.vipType === 'blackgold') {
+                        loginXP = XP_RULES.LOGIN_BLACKGOLD;
+                        vipDailyGain = XP_RULES.VIP_LOGIN_BLACKGOLD; // 黑金 +10
+                    } else if (user.vipType === 'diamond') {
+                        loginXP = XP_RULES.LOGIN_DIAMOND;
+                        vipDailyGain = XP_RULES.VIP_LOGIN_DIAMOND;   // 钻石 +5
+                    }
+                }
+            }
+            xpGain = loginXP;
+
+            // B. [新增] 结算 VIP 经验与等级 (独立于普通经验)
+            if (vipDailyGain > 0) {
+                user.vipXp = (user.vipXp || 0) + vipDailyGain;
+                // 计算新的 VIP 等级
+                let newVipLevel = 1;
+                for (let i = VIP_THRESHOLDS.length - 1; i >= 0; i--) {
+                    if (user.vipXp >= VIP_THRESHOLDS[i]) {
+                        newVipLevel = i + 1;
+                        break;
+                    }
+                }
+                // 只能升不能降 (防止配置修改导致掉级)
+                if (newVipLevel > (user.vipLevel || 1)) {
+                    user.vipLevel = newVipLevel;
+                }
+            }
+        }
+    } 
+    else if (type === 'input') {
+        if (user.dailyStats.inputCount < XP_RULES.DAILY_INPUT_MAX) {
+            xpGain = XP_RULES.INPUT;
+            user.dailyStats.inputCount += 1;
+        }
+    } 
+    else if (type === 'fav') {
+        xpGain = XP_RULES.FAV;
+    }
+
+    if (xpGain > 0) {
+        user.xp = (user.xp || 0) + xpGain;
+        user.dailyStats.totalXP += xpGain;
+
+        // 4. 计算等级
+        let newLevel = 1;
+        for (let i = LEVEL_THRESHOLDS.length - 1; i >= 0; i--) {
+            if (user.xp >= LEVEL_THRESHOLDS[i]) {
+                newLevel = i + 1;
+                break;
+            }
+        }
+        user.level = newLevel;
+        await user.save();
+    }
+    return user;
+};
+// --- [结束] ---
 
 // 辅助函数
 const buildTree = (items) => {
@@ -603,14 +742,28 @@ app.post('/api/auth/login', async (req, res) => {
     if (!user) return res.status(400).json({ error: '用户不存在' }); 
     
     if (await bcrypt.compare(req.body.password, user.password)) { 
+        // --- [修改] 登录时触发经验结算 ---
+        await addExperience(user._id, 'login');
+        const updatedUser = await User.findById(user._id);
+
         const token = jwt.sign({ userId: user._id, username: user.username }, SECRET_KEY); 
         // 返回完整用户信息
         res.json({ 
             token, 
-            username: user.username, 
-            role: user.role || 'user',
-            uid: user.uid,
-            inviteCode: user.inviteCode,
+            username: updatedUser.username, 
+            role: updatedUser.role || 'user',
+            uid: updatedUser.uid,
+            inviteCode: updatedUser.inviteCode,
+            // [新增] 返回等级信息
+            level: updatedUser.level,
+            xp: updatedUser.xp,
+            // [新增] 返回会员信息
+            vipType: updatedUser.vipType,
+            vipExpiry: updatedUser.vipExpiry,
+            // [新增] 返回VIP等级信息
+            vipLevel: updatedUser.vipLevel || 1,
+            vipXp: updatedUser.vipXp || 0,
+            
             nickname: user.nickname || '',
             avatar: user.avatar || '',
             signature: user.signature || '',
@@ -635,6 +788,65 @@ const getStrLen = (str) => {
     }
     return len;
 };
+
+// --- [新增] 收藏行为触发经验值接口 ---
+app.post('/api/user/action/fav', authenticateToken, async (req, res) => {
+    try {
+        const user = await addExperience(req.user.userId, 'fav');
+        // 返回最新的等级和经验，供前端更新
+        res.json({ success: true, level: user.level, xp: user.xp });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// --- [新增] 模拟会员充值/续费接口 ---
+app.post('/api/user/vip/recharge', authenticateToken, async (req, res) => {
+    try {
+        const { plan } = req.body; // 'diamond_month', 'blackgold_month'
+        const user = await User.findById(req.user.userId);
+        
+        const now = new Date();
+        // 如果当前已经是会员且未过期，从过期时间开始续费；否则从现在开始
+        let startTime = now;
+        if (user.vipExpiry && new Date(user.vipExpiry) > now) {
+            startTime = new Date(user.vipExpiry);
+        }
+
+        // 简单的套餐逻辑 (模拟)
+        let durationDays = 30; 
+        let newType = 'none';
+
+        if (plan === 'diamond_month') {
+            newType = 'diamond';
+        } else if (plan === 'blackgold_month') {
+            newType = 'blackgold';
+        } else {
+            return res.status(400).json({ error: '无效的套餐' });
+        }
+
+        // 如果用户原本是黑金，现在充钻石，这里涉及降级逻辑。
+        // 简化处理：直接覆盖类型，时间累加。实际业务可能需要更复杂的折算。
+        // 这里为了演示，如果是同级或升级，直接延长；如果是降级，暂不处理或直接覆盖。
+        
+        // 计算新的过期时间
+        const newExpiry = new Date(startTime.getTime() + durationDays * 24 * 60 * 60 * 1000);
+
+        user.vipType = newType;
+        user.vipExpiry = newExpiry;
+        
+        await user.save();
+
+        res.json({ 
+            success: true, 
+            vipType: user.vipType, 
+            vipExpiry: user.vipExpiry 
+        });
+
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
 
 // === 新增：更新用户信息接口 ===
 app.post('/api/user/update', authenticateToken, async (req, res) => {
@@ -864,7 +1076,10 @@ app.post('/api/questions', authenticateToken, async (req, res) => {
         const isPublicBody = req.body.isPublic === true || req.body.isPublic === 'true';
         const isPublic = (user.role === 'admin' && isPublicBody); 
         const newQ = new Question({ ...req.body, creatorId: req.user.userId, isPublic: isPublic, addedTime: new Date().toISOString().split('T')[0] }); 
-        res.json(await newQ.save()); 
+        // --- [修改] 录题成功后增加经验 ---
+        await newQ.save();
+        await addExperience(req.user.userId, 'input');
+        res.json(newQ);
     } catch (e) { res.status(500).json({ error: '保存失败' }); } 
 });
 app.put('/api/questions/:id', authenticateToken, async (req, res) => { 
