@@ -6,6 +6,7 @@
     "docx": "^9.5.1",
     "file-saver": "^2.0.5",
     "jszip": "^3.10.1",
-    "perfect-freehand": "^1.2.0"
+    "perfect-freehand": "^1.2.3",
+    "roughjs": "^4.6.6"
   }
 }

@@ -172,7 +172,7 @@
               </view>
               <view class="f-row mt-2 align-start">
                 <text class="f-label">地区:</text>
-                <view class="province-grid">
+                <view class="f-tags">
                   <text class="tag" :class="{active: selectedProvince==='全部'}" @click="selectedProvince='全部'">全部</text>
                   <text class="tag" v-for="p in provinceOptions" :key="p" :class="{active: selectedProvince===p}" @click="selectedProvince=p">{{ p }}</text>
                 </view>
@@ -847,7 +847,42 @@ const loadFavData = () => {
 };
 const isFav = (qid) => !!favMap.value[qid];
 const toggleFav = (q) => { if (isFav(q.id)) { delete favMap.value[q.id]; uni.setStorageSync('USER_FAV_DATA', JSON.stringify(favMap.value)); uni.showToast({ title: '已取消收藏', icon: 'none' }); } else { loadFavData(); currentFavQid.value = q.id; showFavModal.value = true; } };
-const confirmFav = (folderId) => { if (currentFavQid.value) { favMap.value[currentFavQid.value] = folderId; uni.setStorageSync('USER_FAV_DATA', JSON.stringify(favMap.value)); uni.showToast({ title: '收藏成功', icon: 'success' }); showFavModal.value = false; currentFavQid.value = null; } };
+const confirmFav = async (folderId) => { 
+    if (currentFavQid.value) { 
+        favMap.value[currentFavQid.value] = folderId; 
+        uni.setStorageSync('USER_FAV_DATA', JSON.stringify(favMap.value)); 
+        
+        try {
+            // [修改] 接收后端返回的最新等级数据
+            const res = await request({ url: '/api/user/action/fav', method: 'POST' });
+            
+            if (res && res.success) {
+                // 1. 更新本地缓存 (关键：让个人中心能读取到新数据)
+                const user = uni.getStorageSync('user') || {};
+                user.level = res.level;
+                user.xp = res.xp;
+                uni.setStorageSync('user', user);
+
+                // 2. 更新当前页面的状态
+                if (currentUser.value) {
+                    currentUser.value.level = res.level;
+                    currentUser.value.xp = res.xp;
+                }
+                
+                // 3. 提示用户
+                uni.showToast({ title: `收藏成功 经验+10`, icon: 'none' });
+            } else {
+                uni.showToast({ title: '收藏成功', icon: 'success' });
+            }
+        } catch(e) { 
+            console.error('XP update failed', e); 
+            uni.showToast({ title: '收藏成功 (经验同步失败)', icon: 'none' });
+        }
+
+        showFavModal.value = false; 
+        currentFavQid.value = null; 
+    } 
+};
 
 const findNode = (nodes, id) => { for(let n of nodes) { if(n.id === id) return n; if(n.children) { const found = findNode(n.children, id); if(found) return found; } } return null; };
 const getAllLeafIds = (nodes) => { let ids = []; nodes.forEach(node => { if (!node.children || node.children.length === 0) ids.push(node.id); else ids = [...ids, ...getAllLeafIds(node.children)]; }); return ids; };
@@ -1256,23 +1291,18 @@ page { height: 100%; overflow: auto; font-family: "Times New Roman", "SimSun", "
 .f-row { display: flex; align-items: center; gap: 2px; font-size: 13px; }
 .f-row.mt-2 { margin-top: 8px; }
 .f-row.align-start { align-items: flex-start; }
-.f-label { font-weight: bold; color: #64748b; width: 40px; flex-shrink: 0; margin-top: 4px; font-size: 14px;}
+.f-label { 
+  font-weight: bold; 
+  color: #64748b; 
+  width: 50px;          /* 原来是 40px，太窄了，改为 50px */
+  flex-shrink: 0; 
+  margin-top: 4px; 
+  font-size: 14px;
+  white-space: nowrap;  /* 【关键】强制文字不换行 */
+}
 .f-tags { display: flex; flex-wrap: wrap; gap: 0px; flex: 1; }
 .tag { padding: 4px 12px; border: none; background: transparent; cursor: pointer; color: #64748b; position: relative; font-size: 14px; }
 .tag.active { background: transparent; color: #2563eb; font-weight: bold; border: none; }
-.province-grid { display: grid; grid-template-columns: repeat(11, 1fr); gap: 0px 0px; flex: 1; }
-.province-grid .tag { 
-  text-align: center; 
-  display: flex; 
-  justify-content: center; 
-  align-items: center; 
-  
-  /* --- 新增/修改以下代码 --- */
-  white-space: nowrap; /* 强制不换行 */
-  padding: 4px 2px;    /* 减小左右内边距 (原为 4px 12px) */
-  font-size: 13px;     /* (可选)稍微调小字号以适应更窄的空间 */
-  width: 100%;         /* 确保填满格子 */
-}
 .state-txt { text-align: center; margin-top: 50px; color: #94a3b8; }
 .q-card { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin-bottom: 16px;margin-right: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
 

@@ -488,7 +488,10 @@ const generateQuestionTemplate = (q) => {
 
   let regionStr = q.province || ''; 
   // 注意：##ID 是系统内部用于识别更新的标签，请勿删除
-  let text = `##年份 ${q.year || ''}
+  
+  // 【修改点】：在下方模板字符串的第一行添加 ##ID ${q.id || ''}
+  let text = `##ID ${q.id || ''}
+##年份 ${q.year || ''}
 ##地区 ${regionStr}
 ##来源 ${q.source || ''}
 ##题号 ${q.qNumber || ''}
@@ -982,9 +985,18 @@ const parseSingleChunk = (chunkText, chunkStartOffset = 0) => {
     qData.detailed = replaceImages(qData.detailed);
 
     const kpRaw = getVal('知识点');
-    qData.categoryIds = kpRaw ? kpRaw.split('/').map(n=>props.knowledgeList.find(l=>l.id==id)?.title).filter(x=>x) : [];
+    // 修复1：原代码使用了未定义的 id 变量导致崩溃。
+    // 修复2：逻辑修正为根据“名称”反查“ID”，确保保存时数据正确。
+    qData.categoryIds = kpRaw ? kpRaw.split('/').map(n => {
+        const title = n.trim();
+        const found = props.knowledgeList.find(l => l.title === title);
+        return found ? found.id : null;
+    }).filter(x => x) : [];
+
     const tagRaw = getVal('标签');
-    qData.tags = tagRaw ? tagRaw.split('/').map(t=>t.trim()).filter(x=>x) : [];
+    // 增强：兼容中文逗号或英文逗号分隔，不仅限于斜杠
+    qData.tags = tagRaw ? tagRaw.split(/[\/，,]/).map(t => t.trim()).filter(x => x) : [];
+    // 【核心修复区域结束】
 
     if (qData.subQuestions.length > 0) {
         const allTags = new Set(qData.tags);

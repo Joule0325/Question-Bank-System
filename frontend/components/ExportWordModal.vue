@@ -177,8 +177,7 @@ const cleanTitle = (text) => {
 };
 
 // 2. 内容处理：提取图片 URL 并清理 HTML 标签，保留 LaTeX 公式
-// 2. 内容处理
-// 2. 内容处理：稳健版，修复500错误并增强样式识别
+// 2. 内容处理：稳健版，修复500错误并增强样式识别 (针对 Word 导出优化)
 const processContent = (text, imageAssets) => {
     if (!text) return '';
     let processed = text;
@@ -214,24 +213,28 @@ const processContent = (text, imageAssets) => {
         }
 
         // 2. 检测居中 (text-align: center)
-        // 使用 {\centering ... \par} 代替 \begin{center}，避免 500 错误
+        // 【修改】改用 center 环境，Pandoc 对此支持更好，能正确转换为 Word 的居中对齐
         if (styleLower.includes('text-align: center') || styleLower.includes('text-align:center')) {
-            return `\n\n{\\centering ${tex} \\par}\n\n`;
+            return `\n\n\\begin{center}\n${tex}\n\\end{center}\n\n`;
         }
 
         // 3. 检测缩进 (text-indent: 2em)
+        // 【修改】改用全角空格(　)，Pandoc 会忽略 \hspace 但会保留文字空格，从而实现 Word 缩进
         if (styleLower.includes('text-indent')) {
-            return `\n\n\\hspace{2em}${tex}\n\n`;
+            return `\n\n　　${tex}\n\n`;
         }
 
         return `\n\n${tex}\n\n`;
     });
 
     // --- C. 兼容自定义标签 [居中][缩进] ---
+    // 【修改】[居中] 标签改用 center 环境
     processed = processed.replace(/\[居中\]([\s\S]*?)(\[\/居中\]|$)/gi, (match, content) => {
-         return `\n\n{\\centering ${content.replace(/\[\/?居中\]/g, '').trim()} \\par}\n\n`;
+         return `\n\n\\begin{center}\n${content.replace(/\[\/?居中\]/g, '').trim()}\n\\end{center}\n\n`;
     });
-    processed = processed.replace(/\[缩进\]/gi, '\\hspace{2em}');
+    
+    // 【修改】[缩进] 标签改用两个全角空格
+    processed = processed.replace(/\[缩进\]/gi, '　　');
 
     // --- D. 其他内联样式 ---
     processed = processed.replace(/<(?:b|strong)[^>]*>(.*?)<\/(?:b|strong)>/gi, '\\textbf{$1}');
@@ -283,7 +286,7 @@ ${cleanTitle(titles.sub)}
         // --- 【关键修改】 ---
         // 弃用 \section*，因为它不支持 \begin{center} 或 \n
         // 改用 \textbf 加粗序号，内容直接拼接，允许内容自带换行或居中
-        tex += `\\par\\bigskip\\noindent\\textbf{${idx + 1}.}\n${safeTitle}\\par\\medskip\n`;
+        tex += `\\par\\bigskip\\noindent\\textbf{${idx + 1}.} ${safeTitle}\\par\\medskip\n`;
         // ------------------
         
         // 选项处理

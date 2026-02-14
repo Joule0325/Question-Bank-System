@@ -26,9 +26,20 @@ const processText = (raw) => {
   // 这样 mp-html 就不会把 <x 当作标签吞掉了，同时保留了 LaTeX 原始格式供后续编译
   
   content = content.replace(/(\$\$[\s\S]*?\$\$)|((?<!\\)\$[^\n$]*?(?<!\\)\$)/g, (match) => {
-      // 只替换公式内部的 < 和 >，其他保持不变
-      return match.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  });
+        // 1. 基础处理：替换 < 和 > 防止被当做 HTML 标签解析
+        let processed = match.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  
+        // 2. 间距优化：检测是否包含 \dfrac (高分式)
+        // 如果包含，包裹一个 span，利用 inline-block + padding 强制撑开行高
+        if (processed.includes('\\dfrac')) {
+            // padding: 8px 0; 上下各增加 8px 间距，可根据需要调整数值
+            // display: inline-block; 是必须的，否则 padding 对行高不生效
+            // vertical-align: middle; 保持与文字垂直居中
+            return `<span style="display:inline-block; padding: 8px 0; vertical-align: middle; line-height: 1.8;">${processed}</span>`;
+        }
+  
+        return processed;
+    });
 
   // ============================================================
   // 第二步：解析 Markdown 表格 (保留原有逻辑)

@@ -22,7 +22,20 @@
                   <view class="avatar-wrap">
                     <image v-if="user.avatar" :src="user.avatar" mode="aspectFill" class="real-avatar" />
                     <view v-else class="avatar-placeholder">{{ user.nickname ? user.nickname[0] : 'U' }}</view>
-                    <view class="level-badge">Lv.{{ user.level || 1 }}</view>
+                    <view 
+                      class="level-badge" 
+                      :class="[getLevelClass(user.level), { 'expanded': isLevelExpanded }]"
+                      @click.stop="toggleLevel"
+                    >
+                        <text class="lv-txt">Lv.{{ user.level || 1 }}</text>
+                        <text v-if="(user.level || 1) >= 7" class="bolt-icon">⚡</text>
+                        
+                        <view class="xp-detail" v-if="isLevelExpanded">
+                            <text class="xp-num">{{ user.xp || 0 }}</text>
+                            <text class="xp-sep">/</text>
+                            <text class="xp-next">{{ nextLevelXP }}</text>
+                        </view>
+                    </view>
                   </view>
                   <view class="header-right">
                     <view class="name-row">
@@ -49,15 +62,16 @@
                     <text class="stat-num">{{ user.coupons || 0 }}</text>
                     <text class="stat-label">优惠券</text>
                   </view>
-                  <view class="stat-item">
-                    <text class="stat-num text-gold">VIP{{ user.vipLevel || 0 }}</text>
+				  <view class="stat-item">
+                    <text class="stat-num text-gold">VIP{{ user.vipLevel || 1 }}</text>
                     <text class="stat-label">等级</text>
                   </view>
+				  
                 </view>
               </view>
               <view class="card-footer-slim">
-                <text class="expiry-label">会员到期：{{ expiryDate }}</text>
-                <view class="renew-btn">立即续费</view>
+                <text class="expiry-label">{{ expiryText }}</text>
+                <view class="renew-btn" @click="handleRecharge">立即续费 / 升级</view>
               </view>
             </view>
 
@@ -458,8 +472,6 @@
     formatOptionLabel
   } from '../utils/configStore.js';
 
-  const userRole = ref('regular');
-
   // 定义默认的初始数据结构
   const defaultUser = {
     nickname: 'Admin',
@@ -476,6 +488,18 @@
   };
 
   const user = ref({});
+  
+  const isLevelExpanded = ref(false);
+    const toggleLevel = () => { isLevelExpanded.value = !isLevelExpanded.value; };
+    
+    // 与后端保持一致的经验阈值
+    const LEVEL_THRESHOLDS_CFG = [0, 5000, 20000, 80000, 200000, 400000, 600000];
+    
+    const nextLevelXP = computed(() => {
+        const lv = user.value.level || 1;
+        if (lv >= 7) return 'MAX'; // 满级
+        return LEVEL_THRESHOLDS_CFG[lv]; // Lv 1 的下一级阈值是 index 1 (5000)
+    });
 
   // 【核心修改 2】修改初始化逻辑，读取真实字段
   const initUserProfile = () => {
@@ -499,6 +523,16 @@
         role: loginInfo.role,
         boundInviteCode: loginInfo.boundInviteCode || '', // 绑定的邀请码
         
+        // --- [新增] 等级字段 ---
+        level: loginInfo.level || 1,
+        xp: loginInfo.xp || 0,
+        
+        // --- [新增] 读取会员字段 ---
+        vipType: loginInfo.vipType || 'none',
+        vipExpiry: loginInfo.vipExpiry || null,
+		vipLevel: loginInfo.vipLevel || 1,
+        vipXp: loginInfo.vipXp || 0,
+
         // 其他字段如果登录时也返回了，最好也加上
         avatar: loginInfo.avatar || profileData.avatar || '',
         signature: loginInfo.signature || profileData.signature || '',
@@ -728,14 +762,80 @@
   const sampleAnalysis = '这里是试题分析内容。为了演示行间距的调整效果，我们需要一段比较长的文字。当您在左侧调整行间距时，这段文字的行与行之间的距离应该会发生相应的变化。';
   const sampleDetailed = '这里是详细解答内容。同样，为了展示字体大小和行间距的实时预览，这段文字也需要足够长。请尝试拖动左侧的滑块，观察这里的排版变化是否符合预期。';
 
-  const roleName = computed(() => userRole.value === 'blackgold' ? '黑金会员' : (userRole.value === 'diamond' ? '钻石会员' : '普通会员'));
-  const membershipClass = computed(() => `role-${userRole.value}`);
-  const expiryDate = computed(() => '2026-12-31');
-
   const previewStyle = computed(() => ({ fontSize: `${config.fontSize}px`, lineHeight: config.lineHeight }));
 
   const saveConfig = () => { persistConfig(config); uni.showToast({ title: '配置已保存', icon: 'success' }); };
+  // --- [新增] 计算等级样式的函数 ---
+    const getLevelClass = (lv) => {
+        const level = lv || 1;
+        if (level <= 2) return 'lv-gray';
+        if (level <= 4) return 'lv-orange-yellow';
+        if (level <= 6) return 'lv-orange-red';
+        return 'lv-red-lightning';
+    };
   const restoreDefault = () => { resetConfig(); if (!config.subIndexFormat) config.subIndexFormat = '(1)'; };
+
+  // --- [新增] 会员相关逻辑 ---
+  // 计算当前有效的会员类型 (如果过期了就降级为 none)
+  const currentVipType = computed(() => {
+      if (!user.value.vipType || user.value.vipType === 'none') return 'none';
+      if (!user.value.vipExpiry) return 'none';
+      if (new Date(user.value.vipExpiry) < new Date()) return 'none'; // 已过期
+      return user.value.vipType;
+  });
+
+  // 绑定卡片样式
+  const membershipClass = computed(() => {
+      const type = currentVipType.value;
+      if (type === 'blackgold') return 'role-blackgold';
+      if (type === 'diamond') return 'role-diamond';
+      return 'role-regular'; 
+  });
+
+  // 显示过期时间
+  const expiryText = computed(() => {
+      if (currentVipType.value === 'none') return '您目前是普通会员';
+      if (!user.value.vipExpiry) return '';
+      const date = new Date(user.value.vipExpiry);
+      return `会员到期：${date.getFullYear()}-${date.getMonth()+1}-${date.getDate()}`;
+  });
+
+  // 充值处理
+  const handleRecharge = () => {
+      uni.showActionSheet({
+          itemList: ['开通钻石会员 (30天)', '开通黑金会员 (30天)'],
+          success: async (res) => {
+              const plan = res.tapIndex === 0 ? 'diamond_month' : 'blackgold_month';
+              const planName = res.tapIndex === 0 ? '钻石会员' : '黑金会员';
+              
+              uni.showLoading({ title: '充值中...' });
+              try {
+                  const apiRes = await request({
+                      url: '/api/user/vip/recharge',
+                      method: 'POST',
+                      data: { plan }
+                  });
+                  
+                  // 更新本地数据
+                  user.value.vipType = apiRes.vipType;
+                  user.value.vipExpiry = apiRes.vipExpiry;
+                  
+                  // 同步到缓存
+                  uni.setStorageSync('USER_PROFILE_DATA', JSON.stringify(user.value));
+                  const loginUser = uni.getStorageSync('user') || {};
+                  loginUser.vipType = apiRes.vipType;
+                  loginUser.vipExpiry = apiRes.vipExpiry;
+                  uni.setStorageSync('user', loginUser);
+                  
+                  uni.hideLoading();
+                  uni.showToast({ title: `${planName} 开通成功！`, icon: 'success' });
+              } catch (e) {
+                  uni.hideLoading();
+                  uni.showToast({ title: '充值失败', icon: 'none' });
+              }
+          }
+      });
+  };
 </script>
 
 <style lang="scss" scoped>
@@ -832,10 +932,39 @@
     &:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0, 0, 0, 0.06); }
   }
 
-  .info-card {
+  /* 普通会员样式 (默认背景) */
+  .info-card.role-regular {
     flex: 1.4;
     position: relative;
     background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
+  }
+  
+  /* 钻石会员 */
+  .info-card.role-diamond {
+      flex: 1.4;
+      position: relative;
+      background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+      border-color: #bfdbfe;
+  }
+  
+  /* 黑金会员 */
+  .info-card.role-blackgold {
+      flex: 1.4;
+      position: relative;
+      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+      color: #fbbf24;
+      border-color: #451a03;
+  }
+  /* 黑金会员下的文字颜色调整 */
+  .info-card.role-blackgold .nickname,
+  .info-card.role-blackgold .stat-num,
+  .info-card.role-blackgold .label-text {
+      color: #fbbf24 !important;
+  }
+  .info-card.role-blackgold .signature,
+  .info-card.role-blackgold .stat-label,
+  .info-card.role-blackgold .id-tag {
+      color: #cbd5e1 !important;
   }
 
   .card-bg-decoration {
@@ -878,17 +1007,79 @@
     font-size: 26px;
     color: #2563eb;
     flex-shrink: 0;
-    overflow: hidden;
   }
 
   .real-avatar { width: 100%; height: 100%; border-radius: 50%; }
-  .level-badge {
-    position: absolute; bottom: -2px; right: -4px;
-    background: #f59e0b; color: white;
-    font-size: 9px; padding: 1px 5px;
-    border-radius: 10px; border: 2px solid white;
-    font-weight: bold;
-  }
+  /* [修改] 基础徽章样式 */
+    .level-badge {
+        position: absolute; bottom: -2px; right: -8px; 
+        color: white;
+        font-size: 10px; padding: 2px 8px;
+        border-radius: 12px; border: 2px solid white;
+        font-weight: 800;
+        display: flex; align-items: center; gap: 2px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        background: #94a3b8;
+        
+        /* 核心动画属性 */
+        transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1);
+        max-width: 50px; /* 收起时的最大宽度 */
+        overflow: hidden;
+        white-space: nowrap;
+        z-index: 20; /* 确保展开时覆盖在其他元素上方 */
+        cursor: pointer;
+      }
+    
+      /* [新增] 展开状态 */
+      .level-badge.expanded {
+          max-width: 160px; /* 展开后的最大宽度 */
+          padding-right: 10px;
+      }
+    
+      /* [新增] 经验值详情文字 */
+      .xp-detail {
+          display: inline-flex;
+          align-items: center;
+          margin-left: 6px;
+          font-size: 9px;
+          opacity: 0;
+          animation: fadeIn 0.3s forwards 0.1s; /* 延迟一点显示，配合宽度展开 */
+      }
+      
+      .xp-sep { margin: 0 2px; opacity: 0.6; }
+      
+      @keyframes fadeIn {
+          from { opacity: 0; transform: translateX(5px); }
+          to { opacity: 1; transform: translateX(0); }
+      }
+  
+    /* [新增] 等级颜色体系 */
+    .level-badge.lv-gray {
+        background: #94a3b8; /* Lv 1-2 灰色 */
+    }
+    .level-badge.lv-orange-yellow {
+        background: linear-gradient(135deg, #facc15, #fb923c); /* Lv 3-4 橘黄色 */
+    }
+    .level-badge.lv-orange-red {
+        background: linear-gradient(135deg, #fb923c, #ef4444); /* Lv 5-6 橘红色 */
+    }
+    .level-badge.lv-red-lightning {
+        background: linear-gradient(135deg, #dc2626, #b91c1c); /* Lv 7 红色 */
+        padding-right: 6px;
+    }
+    
+    /* [新增] 闪电图标动画 */
+    .bolt-icon {
+        font-size: 10px;
+        color: #fef08a; /* 亮黄色闪电 */
+        text-shadow: 0 0 2px rgba(0,0,0,0.2);
+        animation: flash 2s infinite;
+    }
+    
+    @keyframes flash {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.6; }
+    }
 
   .header-right {
     display: flex;
