@@ -44,6 +44,46 @@ const MINERU_API_KEY = 'eyJ0eXBlIjoiSldUIiwiYWxnIjoiSFM1MTIifQ.eyJqdGkiOiI3NDcwM
 const MINERU_BASE_URL = 'https://mineru.net/api/v4';
 
 // ==========================================
+const VIP_RIGHTS = {
+    none: { 
+        name: '普通用户',
+        maxQuestions: 50,
+        exportLimit: 3,
+        ocrLimit: 0,
+        answerViewLimit: 30,
+        subjectLimit: 1,      
+        basketCapacity: 10    // [新增] 试题栏总容量 10题
+    },
+    diamond: { 
+        name: '钻石会员',
+        maxQuestions: 30000, 
+        exportLimit: 20, 
+        ocrLimit: 0,
+        answerViewLimit: 1000, 
+        subjectLimit: 3,      
+        basketCapacity: 100   // [新增] 试题栏总容量 100题
+    },
+    blackgold: { 
+        name: '黑金会员',
+        maxQuestions: 90000, 
+        exportLimit: 50, 
+        ocrLimit: 15, 
+        answerViewLimit: 100000, 
+        subjectLimit: 7,      
+        basketCapacity: 200   // [新增] 试题栏总容量 200题
+    },
+    svip: { 
+        name: '机构尊享',
+        maxQuestions: 999999, 
+        exportLimit: 9999, 
+        ocrLimit: 9999, 
+        answerViewLimit: 999999, 
+        subjectLimit: 999,
+        basketCapacity: 9999  // 无限
+    }
+};
+
+// ==========================================
 // === 工具函数 ===
 // ==========================================
 // [修改] 生成 4 位纯数字 UID (范围 1000-9999)
@@ -116,13 +156,332 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage: storage });
 
-// 鉴权
+// ==========================================
+// === 数据库 Schema 定义 ===
+// ==========================================
+
+// 【修改点】包含所有字段 (基础信息 + 等级 + 会员 + VIP等级 + 权益限制)
+const UserSchema = new mongoose.Schema({
+    username: { type: String, required: true, unique: true },
+    password: { type: String, required: true },
+    role: { type: String, default: 'user' }, 
+    createdAt: { type: Date, default: Date.now },
+    uid: { type: String, unique: true },
+    inviteCode: { type: String, unique: true },
+    nickname: { type: String, unique: true, sparse: true },
+    avatar: String,
+    signature: String,
+    gender: { type: Number, default: 0 },
+    birthDate: String,
+    school: String,
+    boundInviteCode: String,
+    
+    // --- 普通等级系统 (活跃度) ---
+    xp: { type: Number, default: 0 },
+    level: { type: Number, default: 1 },
+    
+    // --- 会员体系 ---
+    vipType: { type: String, default: 'none' }, // none, diamond, blackgold, svip
+    vipExpiry: { type: Date },
+    
+    // --- VIP 荣誉等级 (长期积累) ---
+    vipLevel: { type: Number, default: 1 }, // VIP1 - VIP12
+    vipXp: { type: Number, default: 0 },     // VIP 经验池
+
+    // 存储粉丝的 User ID
+    followers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }], 
+    // 存储关注的人的 User ID
+    following: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+
+    // === [新增] 隐私设置 ===
+    settings: {
+        // 题库展示范围: 'all'(所有人), 'followers'(粉丝), 'friends'(互关好友), 'private'(仅自己)
+        questionVisibility: { type: String, default: 'all' },
+        // 展示哪些题目: 'all'(所有题目), 'public'(仅公共空间题目)
+        questionScope: { type: String, default: 'public' } 
+    },
+
+    // --- [新增] 安全与限额字段 ---
+    lastLoginTime: { type: Number, default: 0 }, // 用于单点登录互斥
+    
+    dailyUsage: {
+        date: String,          // 记录当前日期 (YYYY-MM-DD)
+        exportCount: { type: Number, default: 0 }, // 导出次数
+        ocrCount: { type: Number, default: 0 },    // OCR次数
+        answerViewCount: { type: Number, default: 0 } // 查看答案次数
+    },
+    
+    // 兼容旧的活跃度统计
+    dailyStats: {
+        date: String,
+        inputCount: { type: Number, default: 0 },
+        totalXP: { type: Number, default: 0 }
+    }
+});
+
+const baseFields = {
+    creatorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    isPublic: { type: Boolean, default: false }
+};
+
+const SubjectSchema = new mongoose.Schema({ ...baseFields, id: String, title: String, order: Number });
+const CategorySchema = new mongoose.Schema({ ...baseFields, id: String, subjectId: String, title: String, order: Number, parentId: String });
+
+const QuestionSchema = new mongoose.Schema({ 
+    ...baseFields,
+    subjectId: String, categoryIds: [String], title: String, image: String, 
+    answer: String, analysis: String, detailed: String,
+    type: String, difficulty: Number, year: String, 
+    source: String, qNumber: String, addedTime: String, optionLayout: Number, 
+    options: { A: String, B: String, C: String, D: String }, tags: [String], code: String,
+    province: String,
+    subQuestions: [{
+        content: String, tags: [String],
+        options: { type: Map, of: String }, optionLayout: Number,
+        answer: String, analysis: String, detailed: String
+    }],
+    // === [新增] 是否为官方题目 ===
+    // true=官方空间, false=公共空间(用户上传), undefined=旧数据
+    isOfficial: { type: Boolean, default: false } 
+});
+QuestionSchema.set('toJSON', { virtuals: true, versionKey: false, transform: (doc, ret) => { ret.id = ret._id.toString(); delete ret._id; } });
+
+const User = mongoose.model('User', UserSchema);
+const Subject = mongoose.model('Subject', SubjectSchema);
+const Category = mongoose.model('Category', CategorySchema);
+const Question = mongoose.model('Question', QuestionSchema);
+
+// --- 普通等级配置 (3年满级) ---
+const LEVEL_THRESHOLDS = [0, 5000, 20000, 80000, 200000, 400000, 600000];
+
+// --- [新增] VIP等级配置 (10年满级) ---
+const VIP_THRESHOLDS = [
+    0,      // VIP 1
+    300,    // VIP 2
+    1000,   // VIP 3
+    2500,   // VIP 4
+    5000,   // VIP 5
+    8500,   // VIP 6
+    13000,  // VIP 7
+    18000,  // VIP 8
+    23500,  // VIP 9
+    29500,  // VIP 10
+    36000,  // VIP 11
+    45000   // VIP 12
+];
+
+const XP_RULES = {
+    // 普通经验 (活跃度)
+    LOGIN: 50,           
+    LOGIN_DIAMOND: 100,  
+    LOGIN_BLACKGOLD: 200,
+    INPUT: 30,           
+    FAV: 10,             
+    DAILY_INPUT_MAX: 10, 
+    DAILY_XP_CAP: 1000,
+
+    // [新增] VIP经验 (仅会员登录获取)
+    VIP_LOGIN_DIAMOND: 5,   // 钻石每日 +5
+    VIP_LOGIN_BLACKGOLD: 10 // 黑金每日 +10
+};
+
+// ==========================================
+// === 核心辅助函数：获取当前有效权益 ===
+// ==========================================
+const getCurrentRights = (user) => {
+    let type = 'none';
+    // 检查会员是否有效
+    if (user.vipType && user.vipType !== 'none' && user.vipExpiry) {
+        if (new Date(user.vipExpiry) > new Date()) {
+            type = user.vipType;
+        }
+    }
+    // 如果是 admin，直接给 svip 权限
+    if (user.role === 'admin') type = 'svip';
+    
+    // 容错：如果数据库存了未知类型，回退到 none
+    return VIP_RIGHTS[type] || VIP_RIGHTS['none'];
+};
+
+// ==========================================
+// === 核心辅助函数：检查每日限额 ===
+// ==========================================
+const checkDailyLimit = async (user, actionKey) => { // actionKey: 'exportLimit', 'ocrLimit'
+    const today = new Date().toISOString().split('T')[0];
+    
+    // 初始化 dailyUsage
+    if (!user.dailyUsage) user.dailyUsage = {};
+
+    // 如果日期变化，重置计数
+    if (user.dailyUsage.date !== today) {
+        user.dailyUsage.date = today;
+        user.dailyUsage.exportCount = 0;
+        user.dailyUsage.ocrCount = 0;
+        user.dailyUsage.answerViewCount = 0;
+    }
+    
+    const rights = getCurrentRights(user);
+    const limit = rights[actionKey];
+    
+    // 映射当前计数值
+    let currentCount = 0;
+    if (actionKey === 'exportLimit') currentCount = user.dailyUsage.exportCount;
+    if (actionKey === 'ocrLimit') currentCount = user.dailyUsage.ocrCount;
+    
+    if (currentCount >= limit) {
+        throw new Error(`今日${actionKey === 'exportLimit' ? '导出' : 'OCR识别'}次数已耗尽 (${currentCount}/${limit})，请升级会员`);
+    }
+    
+    return user; // 返回 user 对象以便后续保存
+};
+
+// --- [新增] 经验值处理核心逻辑 ---
+const addExperience = async (userId, type) => {
+    const user = await User.findById(userId);
+    if (!user) return null;
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    
+    // 1. 检查是否需要重置每日统计
+    if (!user.dailyStats || user.dailyStats.date !== todayStr) {
+        user.dailyStats = { date: todayStr, inputCount: 0, totalXP: 0 };
+    }
+
+    // 2. 检查每日总上限
+    if (user.dailyStats.totalXP >= XP_RULES.DAILY_XP_CAP) return user;
+
+    let xpGain = 0;
+
+    // 3. 根据类型计算经验
+    if (type === 'login') {
+        // 每日首次交互(登录)才加分
+        if (user.dailyStats.totalXP === 0) {
+            // A. 计算普通活跃经验
+            let loginXP = XP_RULES.LOGIN;
+            let vipDailyGain = 0; // VIP经验增量
+
+            const now = new Date();
+            if (user.vipType && user.vipType !== 'none' && user.vipExpiry) {
+                // 检查会员是否过期
+                if (new Date(user.vipExpiry) > now) {
+                    if (user.vipType === 'blackgold') {
+                        loginXP = XP_RULES.LOGIN_BLACKGOLD;
+                        vipDailyGain = XP_RULES.VIP_LOGIN_BLACKGOLD; // 黑金 +10
+                    } else if (user.vipType === 'diamond') {
+                        loginXP = XP_RULES.LOGIN_DIAMOND;
+                        vipDailyGain = XP_RULES.VIP_LOGIN_DIAMOND;   // 钻石 +5
+                    }
+                }
+            }
+            xpGain = loginXP;
+
+            // B. [新增] 结算 VIP 经验与等级 (独立于普通经验)
+            if (vipDailyGain > 0) {
+                user.vipXp = (user.vipXp || 0) + vipDailyGain;
+                // 计算新的 VIP 等级
+                let newVipLevel = 1;
+                for (let i = VIP_THRESHOLDS.length - 1; i >= 0; i--) {
+                    if (user.vipXp >= VIP_THRESHOLDS[i]) {
+                        newVipLevel = i + 1;
+                        break;
+                    }
+                }
+                // 只能升不能降
+                if (newVipLevel > (user.vipLevel || 1)) {
+                    user.vipLevel = newVipLevel;
+                }
+            }
+        }
+    } 
+    else if (type === 'input') {
+        if (user.dailyStats.inputCount < XP_RULES.DAILY_INPUT_MAX) {
+            xpGain = XP_RULES.INPUT;
+            user.dailyStats.inputCount += 1;
+        }
+    } 
+    else if (type === 'fav') {
+        xpGain = XP_RULES.FAV;
+    }
+
+    if (xpGain > 0) {
+        user.xp = (user.xp || 0) + xpGain;
+        user.dailyStats.totalXP += xpGain;
+
+        // 4. 计算等级
+        let newLevel = 1;
+        for (let i = LEVEL_THRESHOLDS.length - 1; i >= 0; i--) {
+            if (user.xp >= LEVEL_THRESHOLDS[i]) {
+                newLevel = i + 1;
+                break;
+            }
+        }
+        user.level = newLevel;
+        await user.save();
+    }
+    return user;
+};
+
+// 辅助函数
+const buildTree = (items) => {
+    const map = {}; const roots = [];
+    items.forEach(item => { map[item.id] = { ...item, children: [] }; });
+    items.forEach(item => { if (item.parentId && map[item.parentId]) map[item.parentId].children.push(map[item.id]); else roots.push(map[item.id]); });
+    const sortRecursive = (nodes) => { nodes.sort((a, b) => (a.order || 0) - (b.order || 0)); nodes.forEach(node => { if (node.children.length) sortRecursive(node.children); }); };
+    sortRecursive(roots); return roots;
+};
+
+const deleteCategoryAndChildren = async (catId, query) => {
+    const children = await Category.find({ parentId: catId, ...query });
+    for (const child of children) { await deleteCategoryAndChildren(child.id, query); }
+    await Category.deleteOne({ id: catId, ...query });
+};
+
+const syncCategoriesRecursive = async (nodes, parentId, subjectId, userId, isPublicMode = false) => {
+    const baseQuery = isPublicMode ? { isPublic: true } : { creatorId: userId };
+    const query = parentId ? { parentId, ...baseQuery } : { subjectId, parentId: { $in: [null, '0', ''] }, ...baseQuery };
+    const existingNodes = await Category.find(query);
+    const usedIds = new Set();
+    for (let i = 0; i < nodes.length; i++) {
+        const node = nodes[i];
+        let currentId = null;
+        const match = existingNodes.find(ex => ex.title === node.title && !usedIds.has(ex.id));
+        if (match) {
+            match.order = i; 
+            if (!parentId && match.parentId) match.parentId = null;
+            await match.save();
+            currentId = match.id; usedIds.add(match.id);
+        } else {
+            const newCat = new Category({ id: new mongoose.Types.ObjectId().toString(), subjectId, parentId: parentId || null, title: node.title, order: i, creatorId: userId, isPublic: isPublicMode });
+            await newCat.save(); currentId = newCat.id;
+        }
+        if (node.children && node.children.length > 0) { await syncCategoriesRecursive(node.children, currentId, subjectId, userId, isPublicMode); } 
+        else { const orphanChildren = await Category.find({ parentId: currentId, ...baseQuery }); for (const orphan of orphanChildren) { await deleteCategoryAndChildren(orphan.id, baseQuery); } }
+    }
+    const toDelete = existingNodes.filter(ex => !usedIds.has(ex.id));
+    for (const d of toDelete) { await deleteCategoryAndChildren(d.id, baseQuery); }
+};
+
+// ==========================================
+// === 鉴权中间件 (含单点登录互斥逻辑) ===
+// ==========================================
 const authenticateToken = (req, res, next) => {
     const token = req.headers['authorization']?.split(' ')[1];
     if (!token && !req.query.mode) return res.status(401).json({ error: '未登录' });
     if (token) {
-        jwt.verify(token, SECRET_KEY, (err, user) => {
-            if (!err) req.user = user;
+        jwt.verify(token, SECRET_KEY, async (err, decoded) => {
+            if (err) return res.status(403).json({ error: 'Token 无效' });
+            
+            // 查询数据库获取最新状态
+            const user = await User.findById(decoded.userId);
+            if (!user) return res.status(401).json({ error: '用户不存在' });
+
+            // [新增] 单点登录检查：比较 Token 签发时间与数据库 lastLoginTime
+            if (decoded.loginTime && user.lastLoginTime && decoded.loginTime !== user.lastLoginTime) {
+                return res.status(401).json({ error: '您的账号已在其他设备登录，请重新登录' });
+            }
+
+            req.user = user; // 挂载完整的 mongoose document
+            req.user.userId = user._id.toString(); // 兼容旧代码引用
             next();
         });
     } else next();
@@ -424,6 +783,12 @@ app.post('/api/smart-ocr', authenticateToken, upload.single('file'), async (req,
     const model = req.query.model || req.body.model || 'Qwen'; 
     
     try {
+        // === [新增] OCR 次数限额检查 ===
+        await checkDailyLimit(req.user, 'ocrLimit');
+        req.user.dailyUsage.ocrCount += 1;
+        await req.user.save();
+        // ==============================
+
         res.write(`data: ${JSON.stringify({ t: 'status', c: 'Starting processing...' })}\n\n`);
         console.log(`[Smart-OCR] Start: ${req.file.filename} using ${model}`);
         
@@ -483,234 +848,6 @@ app.post('/api/smart-ocr', authenticateToken, upload.single('file'), async (req,
 // === 数据库 & 业务接口 ===
 // ==========================================
 
-// 【修改点】包含所有字段 (基础信息 + 等级 + 会员 + VIP等级)
-const UserSchema = new mongoose.Schema({
-    username: { type: String, required: true, unique: true },
-    password: { type: String, required: true },
-    role: { type: String, default: 'user' }, 
-    createdAt: { type: Date, default: Date.now },
-    uid: { type: String, unique: true },
-    inviteCode: { type: String, unique: true },
-    nickname: { type: String, unique: true, sparse: true },
-    avatar: String,
-    signature: String,
-    gender: { type: Number, default: 0 },
-    birthDate: String,
-    school: String,
-    boundInviteCode: String,
-    
-    // --- 普通等级系统 (活跃度) ---
-    xp: { type: Number, default: 0 },
-    level: { type: Number, default: 1 },
-    dailyStats: {
-        date: String,
-        inputCount: { type: Number, default: 0 },
-        totalXP: { type: Number, default: 0 }
-    },
-    
-    // --- 会员体系 ---
-    vipType: { type: String, default: 'none' }, // none, diamond, blackgold
-    vipExpiry: { type: Date },
-    
-    // --- [恢复并新增] VIP 荣誉等级 (长期积累) ---
-    vipLevel: { type: Number, default: 1 }, // VIP1 - VIP12
-    vipXp: { type: Number, default: 0 }     // VIP 经验池
-});
-
-const baseFields = {
-    creatorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-    isPublic: { type: Boolean, default: false }
-};
-
-const SubjectSchema = new mongoose.Schema({ ...baseFields, id: String, title: String, order: Number });
-const CategorySchema = new mongoose.Schema({ ...baseFields, id: String, subjectId: String, title: String, order: Number, parentId: String });
-
-const QuestionSchema = new mongoose.Schema({ 
-    ...baseFields,
-    subjectId: String, categoryIds: [String], title: String, image: String, 
-    answer: String, analysis: String, detailed: String,
-    type: String, difficulty: Number, year: String, 
-    source: String, qNumber: String, addedTime: String, optionLayout: Number, 
-    options: { A: String, B: String, C: String, D: String }, tags: [String], code: String,
-    province: String,
-    subQuestions: [{
-        content: String, tags: [String],
-        options: { type: Map, of: String }, optionLayout: Number,
-        answer: String, analysis: String, detailed: String
-    }],
-    // === [新增] 是否为官方题目 ===
-    // true=官方空间, false=公共空间(用户上传), undefined=旧数据
-    isOfficial: { type: Boolean, default: false } 
-});
-QuestionSchema.set('toJSON', { virtuals: true, versionKey: false, transform: (doc, ret) => { ret.id = ret._id.toString(); delete ret._id; } });
-
-const User = mongoose.model('User', UserSchema);
-const Subject = mongoose.model('Subject', SubjectSchema);
-const Category = mongoose.model('Category', CategorySchema);
-const Question = mongoose.model('Question', QuestionSchema);
-
-// --- 普通等级配置 (3年满级) ---
-const LEVEL_THRESHOLDS = [0, 5000, 20000, 80000, 200000, 400000, 600000];
-
-// --- [新增] VIP等级配置 (10年满级) ---
-// 目标：黑金会员(10点/天) 需 3650天 达到满级 => 总经验约 36500
-const VIP_THRESHOLDS = [
-    0,      // VIP 1
-    300,    // VIP 2 (黑金30天)
-    1000,   // VIP 3 (黑金3个月)
-    2500,   // VIP 4
-    5000,   // VIP 5
-    8500,   // VIP 6
-    13000,  // VIP 7 (黑金3.5年)
-    18000,  // VIP 8
-    23500,  // VIP 9
-    29500,  // VIP 10
-    36000,  // VIP 11 (黑金10年略差一点点)
-    45000   // VIP 12 (顶级荣耀)
-];
-
-const XP_RULES = {
-    // 普通经验 (活跃度)
-    LOGIN: 50,           
-    LOGIN_DIAMOND: 100,  
-    LOGIN_BLACKGOLD: 200,
-    INPUT: 30,           
-    FAV: 10,             
-    DAILY_INPUT_MAX: 10, 
-    DAILY_XP_CAP: 1000,
-
-    // [新增] VIP经验 (仅会员登录获取)
-    VIP_LOGIN_DIAMOND: 5,   // 钻石每日 +5
-    VIP_LOGIN_BLACKGOLD: 10 // 黑金每日 +10
-};
-
-// --- [新增] 经验值处理核心逻辑 ---
-const addExperience = async (userId, type) => {
-    const user = await User.findById(userId);
-    if (!user) return null;
-
-    const todayStr = new Date().toISOString().split('T')[0];
-    
-    // 1. 检查是否需要重置每日统计
-    if (!user.dailyStats || user.dailyStats.date !== todayStr) {
-        user.dailyStats = { date: todayStr, inputCount: 0, totalXP: 0 };
-    }
-
-    // 2. 检查每日总上限
-    if (user.dailyStats.totalXP >= XP_RULES.DAILY_XP_CAP) return user;
-
-    let xpGain = 0;
-
-    // 3. 根据类型计算经验
-    if (type === 'login') {
-        // 每日首次交互(登录)才加分
-        if (user.dailyStats.totalXP === 0) {
-            // A. 计算普通活跃经验
-            let loginXP = XP_RULES.LOGIN;
-            let vipDailyGain = 0; // VIP经验增量
-
-            const now = new Date();
-            if (user.vipType && user.vipType !== 'none' && user.vipExpiry) {
-                // 检查会员是否过期
-                if (new Date(user.vipExpiry) > now) {
-                    if (user.vipType === 'blackgold') {
-                        loginXP = XP_RULES.LOGIN_BLACKGOLD;
-                        vipDailyGain = XP_RULES.VIP_LOGIN_BLACKGOLD; // 黑金 +10
-                    } else if (user.vipType === 'diamond') {
-                        loginXP = XP_RULES.LOGIN_DIAMOND;
-                        vipDailyGain = XP_RULES.VIP_LOGIN_DIAMOND;   // 钻石 +5
-                    }
-                }
-            }
-            xpGain = loginXP;
-
-            // B. [新增] 结算 VIP 经验与等级 (独立于普通经验)
-            if (vipDailyGain > 0) {
-                user.vipXp = (user.vipXp || 0) + vipDailyGain;
-                // 计算新的 VIP 等级
-                let newVipLevel = 1;
-                for (let i = VIP_THRESHOLDS.length - 1; i >= 0; i--) {
-                    if (user.vipXp >= VIP_THRESHOLDS[i]) {
-                        newVipLevel = i + 1;
-                        break;
-                    }
-                }
-                // 只能升不能降 (防止配置修改导致掉级)
-                if (newVipLevel > (user.vipLevel || 1)) {
-                    user.vipLevel = newVipLevel;
-                }
-            }
-        }
-    } 
-    else if (type === 'input') {
-        if (user.dailyStats.inputCount < XP_RULES.DAILY_INPUT_MAX) {
-            xpGain = XP_RULES.INPUT;
-            user.dailyStats.inputCount += 1;
-        }
-    } 
-    else if (type === 'fav') {
-        xpGain = XP_RULES.FAV;
-    }
-
-    if (xpGain > 0) {
-        user.xp = (user.xp || 0) + xpGain;
-        user.dailyStats.totalXP += xpGain;
-
-        // 4. 计算等级
-        let newLevel = 1;
-        for (let i = LEVEL_THRESHOLDS.length - 1; i >= 0; i--) {
-            if (user.xp >= LEVEL_THRESHOLDS[i]) {
-                newLevel = i + 1;
-                break;
-            }
-        }
-        user.level = newLevel;
-        await user.save();
-    }
-    return user;
-};
-// --- [结束] ---
-
-// 辅助函数
-const buildTree = (items) => {
-    const map = {}; const roots = [];
-    items.forEach(item => { map[item.id] = { ...item, children: [] }; });
-    items.forEach(item => { if (item.parentId && map[item.parentId]) map[item.parentId].children.push(map[item.id]); else roots.push(map[item.id]); });
-    const sortRecursive = (nodes) => { nodes.sort((a, b) => (a.order || 0) - (b.order || 0)); nodes.forEach(node => { if (node.children.length) sortRecursive(node.children); }); };
-    sortRecursive(roots); return roots;
-};
-
-const deleteCategoryAndChildren = async (catId, query) => {
-    const children = await Category.find({ parentId: catId, ...query });
-    for (const child of children) { await deleteCategoryAndChildren(child.id, query); }
-    await Category.deleteOne({ id: catId, ...query });
-};
-
-const syncCategoriesRecursive = async (nodes, parentId, subjectId, userId, isPublicMode = false) => {
-    const baseQuery = isPublicMode ? { isPublic: true } : { creatorId: userId };
-    const query = parentId ? { parentId, ...baseQuery } : { subjectId, parentId: { $in: [null, '0', ''] }, ...baseQuery };
-    const existingNodes = await Category.find(query);
-    const usedIds = new Set();
-    for (let i = 0; i < nodes.length; i++) {
-        const node = nodes[i];
-        let currentId = null;
-        const match = existingNodes.find(ex => ex.title === node.title && !usedIds.has(ex.id));
-        if (match) {
-            match.order = i; 
-            if (!parentId && match.parentId) match.parentId = null;
-            await match.save();
-            currentId = match.id; usedIds.add(match.id);
-        } else {
-            const newCat = new Category({ id: new mongoose.Types.ObjectId().toString(), subjectId, parentId: parentId || null, title: node.title, order: i, creatorId: userId, isPublic: isPublicMode });
-            await newCat.save(); currentId = newCat.id;
-        }
-        if (node.children && node.children.length > 0) { await syncCategoriesRecursive(node.children, currentId, subjectId, userId, isPublicMode); } 
-        else { const orphanChildren = await Category.find({ parentId: currentId, ...baseQuery }); for (const orphan of orphanChildren) { await deleteCategoryAndChildren(orphan.id, baseQuery); } }
-    }
-    const toDelete = existingNodes.filter(ex => !usedIds.has(ex.id));
-    for (const d of toDelete) { await deleteCategoryAndChildren(d.id, baseQuery); }
-};
-
 // 业务路由
 app.post('/api/auth/register', async (req, res) => { 
     try { 
@@ -737,19 +874,34 @@ app.post('/api/auth/register', async (req, res) => {
     } 
 });
 
+// [修改] 登录接口
 app.post('/api/auth/login', async (req, res) => { 
     const user = await User.findOne({ username: req.body.username }); 
     if (!user) return res.status(400).json({ error: '用户不存在' }); 
     
     if (await bcrypt.compare(req.body.password, user.password)) { 
-        // --- [修改] 登录时触发经验结算 ---
+        // --- 登录时触发经验结算 ---
         await addExperience(user._id, 'login');
+        
+        // === [新增] 更新最后登录时间 (实现单点登录互斥) ===
+        const loginTimestamp = Date.now();
+        user.lastLoginTime = loginTimestamp;
+        await user.save();
+
+        // 将登录时间戳写入 Token
+        const token = jwt.sign({ 
+            userId: user._id, 
+            username: user.username,
+            loginTime: loginTimestamp 
+        }, SECRET_KEY); 
+        
         const updatedUser = await User.findById(user._id);
 
-        const token = jwt.sign({ userId: user._id, username: user.username }, SECRET_KEY); 
         // 返回完整用户信息
         res.json({ 
             token, 
+            following: updatedUser.following, // [新增] 返回关注列表ID数组
+            followers: updatedUser.followers, // [新增]
             username: updatedUser.username, 
             role: updatedUser.role || 'user',
             uid: updatedUser.uid,
@@ -770,7 +922,9 @@ app.post('/api/auth/login', async (req, res) => {
             gender: user.gender || 0,
             birthDate: user.birthDate || '',
             school: user.school || '',
-            boundInviteCode: user.boundInviteCode || '' 
+            boundInviteCode: user.boundInviteCode || '',
+            // [新增] 返回当前权益，供前端参考
+            rights: getCurrentRights(updatedUser)
         }); 
     } else { 
         res.status(400).json({ error: '密码错误' }); 
@@ -807,7 +961,7 @@ app.post('/api/user/vip/recharge', authenticateToken, async (req, res) => {
         const user = await User.findById(req.user.userId);
         
         const now = new Date();
-        // 如果当前已经是会员且未过期，从过期时间开始续费；否则从现在开始
+        // 如果当前已经是会员且未过期，从过期时间开始续费；否则从现在开始 (支持时长累加)
         let startTime = now;
         if (user.vipExpiry && new Date(user.vipExpiry) > now) {
             startTime = new Date(user.vipExpiry);
@@ -827,7 +981,6 @@ app.post('/api/user/vip/recharge', authenticateToken, async (req, res) => {
 
         // 如果用户原本是黑金，现在充钻石，这里涉及降级逻辑。
         // 简化处理：直接覆盖类型，时间累加。实际业务可能需要更复杂的折算。
-        // 这里为了演示，如果是同级或升级，直接延长；如果是降级，暂不处理或直接覆盖。
         
         // 计算新的过期时间
         const newExpiry = new Date(startTime.getTime() + durationDays * 24 * 60 * 60 * 1000);
@@ -922,14 +1075,37 @@ app.get('/api/subjects', authenticateToken, async (req, res) => {
 app.post('/api/subjects/manage', authenticateToken, async (req, res) => { 
     const { action, list } = req.body; 
     const mode = req.body.mode || req.query.mode; 
+    
+    // ... (获取 user 逻辑保持不变) ...
     let user = req.user;
     try {
         const dbUser = await User.findById(req.user.userId);
         if (dbUser) user = dbUser;
     } catch(e) {}
+
     const isPublicMode = (mode === 'public' || mode === 'community') && user.role === 'admin';
     const userQuery = isPublicMode ? { isPublic: true } : { creatorId: req.user.userId }; 
-    try { if (action === 'update_list') { const existingSubjects = await Subject.find(userQuery); const existingIds = existingSubjects.map(s => s.id); const keepIds = list.filter(s => !s.id.startsWith('new_')).map(s => s.id); const toDelete = existingIds.filter(eid => !keepIds.includes(eid)); if (toDelete.length > 0) await Subject.deleteMany({ id: { $in: toDelete }, ...userQuery }); for (let i = 0; i < list.length; i++) { const item = list[i]; if (item.id.startsWith('new_')) { await new Subject({ id: new mongoose.Types.ObjectId().toString(), title: item.title, order: i, creatorId: req.user.userId, isPublic: isPublicMode }).save(); } else { await Subject.findOneAndUpdate({ id: item.id, ...userQuery }, { title: item.title, order: i }); } } res.json({ success: true }); } else { res.status(400).json({ error: 'Invalid action' }); } } catch(e) { res.status(500).json({ error: e.message }); } });
+    
+    try { 
+        if (action === 'update_list') { 
+            // === [新增] 检查目录类型(科目)数量 ===
+            if (!isPublicMode) { // 只有私人空间才限制
+                const rights = getCurrentRights(user);
+                // list 是用户提交的最新科目列表，直接检查其长度
+                if (list.length > rights.subjectLimit) {
+                    return res.status(403).json({ 
+                        error: `您的会员等级最多只能创建 ${rights.subjectLimit} 个目录类型，请升级会员` 
+                    });
+                }
+            }
+            // ====================================
+
+            const existingSubjects = await Subject.find(userQuery); 
+            // ... (后续保存逻辑保持不变) ...
+            const existingIds = existingSubjects.map(s => s.id); const keepIds = list.filter(s => !s.id.startsWith('new_')).map(s => s.id); const toDelete = existingIds.filter(eid => !keepIds.includes(eid)); if (toDelete.length > 0) await Subject.deleteMany({ id: { $in: toDelete }, ...userQuery }); for (let i = 0; i < list.length; i++) { const item = list[i]; if (item.id.startsWith('new_')) { await new Subject({ id: new mongoose.Types.ObjectId().toString(), title: item.title, order: i, creatorId: req.user.userId, isPublic: isPublicMode }).save(); } else { await Subject.findOneAndUpdate({ id: item.id, ...userQuery }, { title: item.title, order: i }); } } res.json({ success: true }); 
+        } else { res.status(400).json({ error: 'Invalid action' }); } 
+    } catch(e) { res.status(500).json({ error: e.message }); } 
+});
 app.get('/api/categories', authenticateToken, async (req, res) => { 
     const { mode, subjectId } = req.query; 
     const query = { subjectId }; 
@@ -1030,7 +1206,7 @@ app.get('/api/questions', authenticateToken, async (req, res) => {
         // [关键] populate creatorId 获取上传者信息
         const questions = await Question.find(filter)
             .sort({ _id: -1 })
-            .populate('creatorId', 'username nickname avatar signature level following fans coupons vipLevel uid'); 
+            .populate('creatorId', 'username nickname avatar signature level following followers fans coupons vipLevel uid'); 
             
         res.json({ total: questions.length, data: questions }); 
     } catch (e) { res.status(500).json({ error: e.message }); } 
@@ -1068,11 +1244,18 @@ app.post('/api/questions/publish', authenticateToken, async (req, res) => {
 });
 app.post('/api/questions', authenticateToken, async (req, res) => { 
     try { 
+        // === [新增] 检查自定义题目总量 ===
+        const rights = getCurrentRights(req.user);
+        const currentCount = await Question.countDocuments({ creatorId: req.user.userId });
+        
+        if (currentCount >= rights.maxQuestions) {
+            return res.status(403).json({ 
+                error: `您的自定义题目数量已达上限 (${currentCount}/${rights.maxQuestions})，请升级会员` 
+            });
+        }
+        // ==============================
+
         let user = req.user;
-        try {
-            const dbUser = await User.findById(req.user.userId);
-            if (dbUser) user = dbUser;
-        } catch(e) {}
         const isPublicBody = req.body.isPublic === true || req.body.isPublic === 'true';
         const isPublic = (user.role === 'admin' && isPublicBody); 
         const newQ = new Question({ ...req.body, creatorId: req.user.userId, isPublic: isPublic, addedTime: new Date().toISOString().split('T')[0] }); 
@@ -1118,21 +1301,27 @@ app.delete('/api/questions/:id', authenticateToken, async (req, res) => {
 });
 app.post('/api/questions/fork', authenticateToken, async (req, res) => { const { questionId, targetSubjectId, targetCategoryIds } = req.body; try { const originalQ = await Question.findOne({ _id: questionId, isPublic: true }).lean(); if (!originalQ) return res.status(404).json({ error: '未找到该公共题目' }); delete originalQ._id; delete originalQ.id; const newQ = new Question({ ...originalQ, creatorId: req.user.userId, isPublic: false, subjectId: targetSubjectId, categoryIds: targetCategoryIds, addedTime: new Date().toISOString().split('T')[0], code: 'F' + Date.now().toString().slice(-6) }); await newQ.save(); res.json({ success: true, id: newQ.id }); } catch (e) { res.status(500).json({ error: e.message }); } });
 
-// 编译接口
-app.post('/api/compile', async (req, res) => {
+// 编译接口 (增加鉴权和限额)
+app.post('/api/compile', authenticateToken, async (req, res) => {
     let { sourceCode, imageAssets } = req.body; 
     if (!sourceCode) return res.status(400).json({ error: '无 LaTeX 代码' });
 
-    const timestamp = Date.now();
-    const jobDir = path.join(compileDir, `job_${timestamp}`);
-    if (!fs.existsSync(jobDir)) { fs.mkdirSync(jobDir, { recursive: true }); }
-    const imagesDir = path.join(jobDir, 'images');
-    if (!fs.existsSync(imagesDir)) { fs.mkdirSync(imagesDir, { recursive: true }); }
-
-    const texFile = path.join(jobDir, `paper.tex`);
-    const pdfFilename = `paper.pdf`;
-    
     try {
+        // === [新增] 导出限额检查 ===
+        await checkDailyLimit(req.user, 'exportLimit');
+        req.user.dailyUsage.exportCount += 1;
+        await req.user.save();
+        // =========================
+
+        const timestamp = Date.now();
+        const jobDir = path.join(compileDir, `job_${timestamp}`);
+        if (!fs.existsSync(jobDir)) { fs.mkdirSync(jobDir, { recursive: true }); }
+        const imagesDir = path.join(jobDir, 'images');
+        if (!fs.existsSync(imagesDir)) { fs.mkdirSync(imagesDir, { recursive: true }); }
+
+        const texFile = path.join(jobDir, `paper.tex`);
+        const pdfFilename = `paper.pdf`;
+    
         if (os.platform() === 'darwin') {
             if (sourceCode.includes('\\documentclass[UTF8]{ctexart}')) {
                 sourceCode = sourceCode.replace('\\documentclass[UTF8]{ctexart}', '\\documentclass[UTF8,fontset=mac]{ctexart}');
@@ -1206,21 +1395,27 @@ app.post('/api/compile', async (req, res) => {
     }
 });
 
-// [新增] Word 编译接口 (依赖 Pandoc)
-app.post('/api/compile/word', async (req, res) => {
+// [新增] Word 编译接口 (依赖 Pandoc) - 增加鉴权和限额
+app.post('/api/compile/word', authenticateToken, async (req, res) => {
     let { sourceCode, imageAssets } = req.body; 
     if (!sourceCode) return res.status(400).json({ error: '无 LaTeX 代码' });
 
-    const timestamp = Date.now();
-    const jobDir = path.join(compileDir, `word_job_${timestamp}`);
-    if (!fs.existsSync(jobDir)) { fs.mkdirSync(jobDir, { recursive: true }); }
-    const imagesDir = path.join(jobDir, 'images');
-    if (!fs.existsSync(imagesDir)) { fs.mkdirSync(imagesDir, { recursive: true }); }
-
-    const texFile = path.join(jobDir, `paper.tex`);
-    const docxFilename = `paper.docx`;
-    
     try {
+        // === [新增] 导出限额检查 ===
+        await checkDailyLimit(req.user, 'exportLimit');
+        req.user.dailyUsage.exportCount += 1;
+        await req.user.save();
+        // =========================
+
+        const timestamp = Date.now();
+        const jobDir = path.join(compileDir, `word_job_${timestamp}`);
+        if (!fs.existsSync(jobDir)) { fs.mkdirSync(jobDir, { recursive: true }); }
+        const imagesDir = path.join(jobDir, 'images');
+        if (!fs.existsSync(imagesDir)) { fs.mkdirSync(imagesDir, { recursive: true }); }
+
+        const texFile = path.join(jobDir, `paper.tex`);
+        const docxFilename = `paper.docx`;
+    
         // 1. 处理图片 (复用 PDF 的逻辑，Pandoc 也需要本地图片路径)
         if (imageAssets && typeof imageAssets === 'object') {
             let imgCounter = 0;
@@ -1262,9 +1457,6 @@ app.post('/api/compile/word', async (req, res) => {
         fs.writeFileSync(texFile, sourceCode);
 
         // 3. 调用 Pandoc 转换
-        // -f latex: 输入格式 latex
-        // -t docx: 输出格式 docx
-        // --standalone: 生成完整文档
         const templatePath = path.join(process.cwd(), 'template.docx');
     
         // 构建命令：如果有模板，就应用模板
@@ -1294,5 +1486,67 @@ app.post('/api/compile/word', async (req, res) => {
         res.status(500).json({ error: e.message });
     }
 });
+
+// ... existing code ...
+
+// === [新增] 关注/取消关注接口 ===
+app.post('/api/user/follow', authenticateToken, async (req, res) => {
+    try {
+        const targetUserId = req.body.targetId;
+        const currentUserId = req.user.userId;
+
+        if (targetUserId === currentUserId) {
+            return res.status(400).json({ error: '不能关注自己' });
+        }
+
+        const targetUser = await User.findById(targetUserId);
+        const currentUser = await User.findById(currentUserId);
+
+        if (!targetUser) return res.status(404).json({ error: '用户不存在' });
+
+        // 检查是否已经关注
+        const isFollowing = currentUser.following.includes(targetUserId);
+        let action = '';
+
+        if (isFollowing) {
+            // === 取消关注逻辑 ===
+            // 1. 从我的关注列表中移除他
+            await User.findByIdAndUpdate(currentUserId, { $pull: { following: targetUserId } });
+            // 2. 从他的粉丝列表中移除我
+            await User.findByIdAndUpdate(targetUserId, { $pull: { followers: currentUserId } });
+            // 减少计数 (可选，如果前端不依赖数据库count字段而是数组长度)
+            action = 'unfollowed';
+        } else {
+            // === 关注逻辑 ===
+            // 1. 添加到我的关注列表
+            await User.findByIdAndUpdate(currentUserId, { $addToSet: { following: targetUserId } });
+            // 2. 添加到他的粉丝列表
+            await User.findByIdAndUpdate(targetUserId, { $addToSet: { followers: currentUserId } });
+            action = 'followed';
+        }
+
+        // 获取最新数据返回
+        const newTarget = await User.findById(targetUserId);
+        const newMe = await User.findById(currentUserId);
+
+        // 判断是否互相关注 (好友)
+        const isFriend = newMe.following.includes(targetUserId) && newMe.followers.includes(targetUserId);
+
+        res.json({ 
+            success: true, 
+            action,
+            isFriend,
+            // 返回目标用户最新的粉丝数
+            targetFollowersCount: newTarget.followers.length,
+            // 返回我最新的关注列表，用于前端更新状态
+            myFollowing: newMe.following 
+        });
+
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
 
 app.listen(PORT, () => console.log(`🚀 API Server running on port ${PORT}`));
