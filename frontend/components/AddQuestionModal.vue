@@ -1147,6 +1147,8 @@ const handleSave = async () => {
   }
 
   uni.showLoading({ title: '保存中' });
+  let successCount = 0; // [新增] 计数器
+
   try {
       for (const item of previewList.value) {
           const payload = { ...item, subjectId: props.subjectId, isPublic: props.isPublic };
@@ -1163,6 +1165,8 @@ const handleSave = async () => {
 
           if(item.id) await updateQuestion(item.id, payload);
           else await saveQuestion(payload);
+          
+          successCount++; // [新增] 每存成功一个就+1
       }
       uni.hideLoading();
       uni.showToast({title:'全部已保存', icon:'success'});
@@ -1171,7 +1175,22 @@ const handleSave = async () => {
   } catch(e) {
       uni.hideLoading();
       console.error(e);
-      uni.showToast({title:'保存失败', icon:'none'});
+      
+      // [新增] 智能错误处理
+      const errMsg = e.error || e.message || '保存失败';
+      if (successCount > 0) {
+          // 只要存进去过题目，就必须通知首页刷新
+          emit('saved'); 
+          // 提示用户：部分成功，部分失败
+          uni.showModal({
+              title: '部分保存成功',
+              content: `已成功保存前 ${successCount} 道题。\n后续题目保存失败：${errMsg}`,
+              showCancel: false
+          });
+      } else {
+          // 一道都没存进去
+          uni.showToast({title: errMsg, icon:'none'});
+      }
       return false;
   }
 };

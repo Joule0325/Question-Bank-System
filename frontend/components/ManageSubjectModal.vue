@@ -151,21 +151,51 @@ const resetDragState = () => {
 }
 
 
-// --- 保存逻辑 (不变) ---
 const handleSave = async () => {
   try {
     uni.showLoading({ title: '保存中...' });
-    await uni.request({ 
-      url: baseUrl + '/api/subjects/manage', method: 'POST', 
+    
+    // 1. 获取请求返回的完整结果 (res)
+    const res = await uni.request({ 
+      url: baseUrl + '/api/subjects/manage', 
+      method: 'POST', 
       header: { Authorization: 'Bearer ' + uni.getStorageSync('token') },
-      data: { action: 'update_list', list: list.value.map(item => ({ id: item.id, title: item.title })), mode: props.mode } 
+      data: { 
+          action: 'update_list', 
+          list: list.value.map(item => ({ id: item.id, title: item.title })), 
+          mode: props.mode 
+      } 
     });
+
+    // 2. [关键修复] 检查 HTTP 状态码
+    // 如果不是 200 (比如 403, 500)，手动抛出错误进入 catch
+    if (res.statusCode && res.statusCode !== 200) {
+        // 尝试获取后端返回的具体错误文字 (例如: "您的会员等级最多只能...")
+        const errorMsg = res.data?.error || '保存失败';
+        throw new Error(errorMsg);
+    }
+
+    // 3. 只有状态码是 200 时，才执行成功逻辑
     uni.hideLoading();
     uni.showToast({ title: '保存成功', icon: 'success' });
     emit('saved');
     return true;
+
   } catch(e) { 
-    uni.hideLoading(); uni.showToast({ title: '保存失败', icon: 'none' }); return false;
+    uni.hideLoading();
+    
+    // 4. [关键修复] 将具体的错误原因显示给用户
+    // e.message 就是上面 throw new Error(...) 里的内容
+    const msg = e.message || '保存失败';
+    
+    uni.showToast({ 
+        title: msg, 
+        icon: 'none',
+        duration: 3000 // 错误提示多留几秒，让你看清楚
+    }); 
+    
+    console.error('保存出错:', e);
+    return false;
   }
 };
 const handleSaveAndExit = async () => { const success = await handleSave(); if (success) handleClose(); };

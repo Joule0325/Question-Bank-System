@@ -307,8 +307,11 @@
                     </view>
                 
                     <view class="tags-row" :id="'tags-row-' + q.id">
-                        <view v-for="tag in getKnowledgeTags(q.categoryIds)" :key="'k-'+(tag.id || tag.title)" class="tag-badge red" @click.stop="handleTagClick(tag.title || tag)">
-                            <image src="/static/icons/标签-红.svg" class="tag-icon icon-red" mode="aspectFit"></image><text>{{ tag.title || tag }}</text>
+                        <view v-for="tag in getKnowledgeTags(q.categoryIds)" 
+                              :key="'k-'+(tag.id || tag.title)" 
+                              class="tag-badge red" 
+                              @click.stop="handleTagClick(tag, 'cat')"> <image src="/static/icons/标签-红.svg" class="tag-icon icon-red" mode="aspectFit"></image>
+                            <text>{{ tag.title || tag }}</text>
                         </view>
                         <view v-for="tag in (q.tags||[])" :key="'t-'+tag" class="tag-badge blue" @click.stop="handleTagClick(tag)">
                             <image src="/static/icons/标签-蓝.svg" class="tag-icon icon-blue" mode="aspectFit"></image><text>{{ tag }}</text>
@@ -479,6 +482,14 @@ import UserHoverCard from '@/components/UserHoverCard.vue'; // 【新增引入�
 import { onLoad } from '@dcloudio/uni-app';
 import { globalConfig, formatOptionLabel, formatSubIndex } from '@/utils/configStore.js';
 
+// 1. 修改前端配置表 (移除 basketLimit, 增加 basketCapacity)
+const VIP_RIGHTS_CFG = {
+    none: { basketCapacity: 10, name: '普通用户' },     // 改为容量限制
+    diamond: { basketCapacity: 100, name: '钻石会员' },
+    blackgold: { basketCapacity: 200, name: '黑金会员' },
+    svip: { basketCapacity: 9999, name: '机构尊享' }
+};
+
 // --- 1. 变量定义 ---
 const currentMode = ref('private'); 
 const isSidebarCollapsed = ref(false); 
@@ -490,6 +501,31 @@ const categories = ref([]);
 const questions = ref([]);
 const flatLeaves = ref([]);
 const loading = ref(false);
+
+// [新增] 计算当前用户的试题栏总容量
+const currentBasketCapacity = computed(() => {
+    if (!currentUser.value) return 10; 
+    let type = currentUser.value.vipType || 'none';
+    const expiry = currentUser.value.vipExpiry;
+    if (type !== 'none' && expiry) {
+        if (new Date(expiry) < new Date()) type = 'none';
+    }
+    if (currentUser.value.role === 'admin') type = 'svip';
+    
+    return VIP_RIGHTS_CFG[type] ? VIP_RIGHTS_CFG[type].basketCapacity : 10;
+});
+
+// [新增] 计算当前所有篮子里的题目总数
+const totalBasketCount = computed(() => {
+    let total = 0;
+    // 遍历 baskets 对象 (key 为 1-7)
+    for (const key in baskets.value) {
+        if (Array.isArray(baskets.value[key])) {
+            total += baskets.value[key].length;
+        }
+    }
+    return total;
+});
 
 const filterYear = ref('');     
 const filterSource = ref('');
@@ -893,7 +929,26 @@ const handlePageSizeChange = (e) => { itemsPerPage.value = [10,20,50][e.detail.v
 const changePage = (delta) => { const newVal = currentPage.value + delta; if(newVal >= 1 && newVal <= totalPages.value) currentPage.value = newVal; };
 const toggleJumpPopover = () => { showJumpPopover.value = !showJumpPopover.value; if(showJumpPopover.value) jumpPageInput.value = ''; };
 const handleJumpConfirm = () => { const p = parseInt(jumpPageInput.value); if (p && p >= 1 && p <= totalPages.value) { currentPage.value = p; loadQuestions(); showJumpPopover.value = false; } else { uni.showToast({title:'页码无效', icon:'none'}); } };
-const handleTagClick = (tag) => { if(selectedTags.value.includes(tag)) selectedTags.value = selectedTags.value.filter(t => t !== tag); else selectedTags.value.push(tag); };
+const handleTagClick = (tagOrObj, type = 'tag') => {
+    if (type === 'cat') {
+        // 处理目录筛选逻辑 (更新 selectedCategoryIds)
+        const id = tagOrObj.id;
+        if (selectedCategoryIds.value.includes(id)) {
+            selectedCategoryIds.value = selectedCategoryIds.value.filter(i => i !== id);
+        } else {
+            // 如果不支持多选目录，这里可能需要清空再赋值
+            selectedCategoryIds.value = [...selectedCategoryIds.value, id];
+        }
+    } else {
+        // 处理普通标签逻辑 (更新 selectedTags)
+        const tag = tagOrObj;
+        if (selectedTags.value.includes(tag)) {
+            selectedTags.value = selectedTags.value.filter(t => t !== tag);
+        } else {
+            selectedTags.value = [...selectedTags.value, tag];
+        }
+    }
+};
 const isSubQHighlighted = (subQ) => { if (!selectedTags.value.length || !subQ.tags?.length) return false; return subQ.tags.some(tag => selectedTags.value.includes(tag)); };
 const removeFilter = (item) => { if (item.type === 'cat') selectedCategoryIds.value = selectedCategoryIds.value.filter(id => id !== item.id); else if (item.type === 'tag') selectedTags.value = selectedTags.value.filter(tag => tag !== item.name); else if (item.type === 'province') selectedProvince.value = '全部'; else if (item.type === 'year') { filterYear.value = ''; loadQuestions(); } else if (item.type === 'source') { filterSource.value = ''; loadQuestions(); } else if (item.type === 'qnum') { filterQNumber.value = ''; loadQuestions(); } };
 const clearAllFilters = () => { selectedCategoryIds.value = []; selectedTags.value = []; selectedProvince.value = '全部'; filterYear.value = ''; filterSource.value = ''; filterQNumber.value = ''; loadQuestions(); };
@@ -906,7 +961,33 @@ const toggleExpandAll = (expand) => { defaultTreeOpen.value = expand; manageMenu
 const getKnowledgeTags = (ids) => ids.map(id => flatLeaves.value.find(l => l.id === id) || {id, title:id}).filter(x=>x);
 const toggleAnswer = (id) => showAnswerMap.value[id] = !showAnswerMap.value[id];
 const toggleWaiting = (id) => waitingBasketKey.value = waitingBasketKey.value === id ? null : id;
-const handleKeyBasket = (e) => { if(waitingBasketKey.value && e.key >= '1' && e.key <= '7') { const k = parseInt(e.key); const q = questions.value.find(x => x.id === waitingBasketKey.value); if(q && !baskets.value[k].find(x => x.id === q.id)) baskets.value[k].push(q); waitingBasketKey.value = null; } if(e.key === 'Escape') waitingBasketKey.value = null; };
+const handleKeyBasket = (e) => { 
+    if(waitingBasketKey.value && e.key >= '1' && e.key <= '7') { 
+        const k = parseInt(e.key);
+        const q = questions.value.find(x => x.id === waitingBasketKey.value); 
+        
+        if (q) {
+            // 检查1: 是否已经在该篮子里
+            if (baskets.value[k].find(x => x.id === q.id)) {
+                // 已存在，不做处理，或者提示
+            } 
+            // 检查2: 总容量是否超限 (注意：这里用 >= 因为是加入前检查)
+            else if (totalBasketCount.value >= currentBasketCapacity.value) {
+                uni.showToast({ 
+                    title: `试题栏已满 (${totalBasketCount.value}/${currentBasketCapacity.value})，请升级`, 
+                    icon: 'none' 
+                });
+            }
+            // 通过检查，执行加入
+            else {
+                baskets.value[k].push(q); 
+                uni.showToast({ title: `已加入试题栏 ${k}`, icon: 'success' });
+            }
+        }
+        waitingBasketKey.value = null; 
+    } 
+    if(e.key === 'Escape') waitingBasketKey.value = null; 
+};
 const removeFromBasket = (bid, qid) => baskets.value[bid] = baskets.value[bid].filter(x => x.id !== qid);
 const handleExportPdf = () => { showExportModal.value = true; };
 const handleExportWord = () => { showWordExportModal.value = true; };

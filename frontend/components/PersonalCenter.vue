@@ -49,23 +49,23 @@
                 </view>
                 <text class="signature">{{ user.signature || '这个人很懒，什么都没写~' }}</text>
                 <view class="stats-row">
-                  <view class="stat-item">
-                    <text class="stat-num">{{ user.following || 0 }}</text>
-                    <text class="stat-label">关注</text>
-                  </view>
-                  <view class="stat-item">
-                    <text class="stat-num">{{ user.fans || 0 }}</text>
-                    <text class="stat-label">粉丝</text>
-                  </view>
-                  <view class="stat-item">
-                    <text class="stat-num">{{ user.coupons || 0 }}</text>
-                    <text class="stat-label">优惠券</text>
-                  </view>
-                  <view class="stat-item">
-                    <text class="stat-num text-gold">VIP{{ user.vipLevel || 1 }}</text>
-                    <text class="stat-label">等级</text>
-                  </view>
-                </view>
+                                  <view class="stat-item">
+                                    <text class="stat-num">{{ Array.isArray(user.following) ? user.following.length : 0 }}</text>
+                                    <text class="stat-label">关注</text>
+                                  </view>
+                                  <view class="stat-item">
+                                    <text class="stat-num">{{ Array.isArray(user.fans) ? user.fans.length : 0 }}</text>
+                                    <text class="stat-label">粉丝</text>
+                                  </view>
+                                  <view class="stat-item">
+                                    <text class="stat-num">{{ user.coupons || 0 }}</text>
+                                    <text class="stat-label">优惠券</text>
+                                  </view>
+                                  <view class="stat-item">
+                                    <text class="stat-num text-gold">VIP{{ user.vipLevel || 1 }}</text>
+                                    <text class="stat-label">等级</text>
+                                  </view>
+                                </view>
               </view>
               <view class="card-footer-slim">
                 <text class="expiry-label">{{ expiryText }}</text>
@@ -76,17 +76,19 @@
             <view class="rights-static-card diamond-theme">
               <view class="static-header"><text>钻石会员权益</text></view>
               <view class="static-body">
-                <view class="r-item"><text>✓</text> 无限次组卷下载</view>
-                <view class="r-item"><text>✓</text> 解锁所有题目解析</view>
-                <view class="r-item"><text>✓</text> 专属 5G 云存储空间</view>
+                <view class="r-item"><text>✓</text> 自定义题目 3万个</view>
+                <view class="r-item"><text>✓</text> 导出源码 20次/天</view>
+                <view class="r-item"><text>✓</text> 试题分类 4个</view>
+                <view class="r-item"><text>✓</text> 官方答案 1000次/天</view>
               </view>
             </view>
             <view class="rights-static-card blackgold-theme">
               <view class="static-header"><text>黑金会员权益</text></view>
               <view class="static-body">
-                <view class="r-item"><text>✓</text> 包含所有钻石权益</view>
-                <view class="r-item"><text>✓</text> 智能 AI 组卷助手</view>
-                <view class="r-item"><text>✓</text> 专属定制学校 Logo</view>
+                <view class="r-item"><text>✓</text> 自定义题目 9万个</view>
+                <view class="r-item"><text>✓</text> 导出源码 50次/天</view>
+                <view class="r-item"><text>✓</text> 试题分类 7个</view>
+                <view class="r-item"><text>✓</text> 智能OCR 15次/天</view>
               </view>
             </view>
             <view class="rights-static-card svip-theme">
@@ -772,7 +774,26 @@
     };
   
     // --- CRUD (分类管理) ---
+    // 在 script setup 中找到 addPaperL1Group 函数并替换
+    
+    // 定义权益配置 (为了前端即时反馈，前端也存一份配置)
+    const VIP_RIGHTS_CFG = {
+        none: { paperFolders: 1, name: '普通用户' },
+        diamond: { paperFolders: 3, name: '钻石会员' },
+        blackgold: { paperFolders: 7, name: '黑金会员' },
+        svip: { paperFolders: 999, name: '机构尊享' }
+    };
+    
+    const getCurrentVipType = () => {
+        // 复用你已有的 currentVipType 计算属性逻辑
+        if (!user.value.vipType || user.value.vipType === 'none') return 'none';
+        if (!user.value.vipExpiry) return 'none';
+        if (new Date(user.value.vipExpiry) < new Date()) return 'none';
+        return user.value.vipType;
+    };
+    
     const addPaperL1Group = () => {
+        // 恢复原样，不再检查 limit
         uni.showModal({
             title: '新建一级分类', editable: true, placeholderText: '如：高三复习',
             success: (res) => {
@@ -899,32 +920,55 @@
     });
 
   const initUserProfile = () => {
-      const loginInfo = uni.getStorageSync('user') || {}; 
-      let storedProfile = uni.getStorageSync('USER_PROFILE_DATA');
-      let profileData = storedProfile ? JSON.parse(storedProfile) : {};
+        // 1. 获取登录时的核心数据 (这是最准确的数据源，包含最新的 following/followers 数组)
+        const loginInfo = uni.getStorageSync('user') || {}; 
+        
+        // 2. 获取本地缓存的编辑资料 (可能包含修改过的签名、头像等)
+        let storedProfile = uni.getStorageSync('USER_PROFILE_DATA');
+        let profileData = storedProfile ? JSON.parse(storedProfile) : {};
+    
+        // 3. [关键步骤] 提取最新的社交数据
+        // 必须确保它是数组，否则 .length 会报错或显示不出来
+        const realFollowing = Array.isArray(loginInfo.following) ? loginInfo.following : [];
+        const realFollowers = Array.isArray(loginInfo.followers) ? loginInfo.followers : [];
   
-      user.value = {
-        ...defaultUser,
-        ...profileData,
-        username: loginInfo.username,
-        nickname: loginInfo.nickname || profileData.nickname || defaultUser.nickname,
-        uid: loginInfo.uid || '未登录',
-        inviteCode: loginInfo.inviteCode || '----',
-        role: loginInfo.role,
-        boundInviteCode: loginInfo.boundInviteCode || '',
-        level: loginInfo.level || 1,
-        xp: loginInfo.xp || 0,
-        vipType: loginInfo.vipType || 'none',
-        vipExpiry: loginInfo.vipExpiry || null,
-		vipLevel: loginInfo.vipLevel || 1,
-        vipXp: loginInfo.vipXp || 0,
-        avatar: loginInfo.avatar || profileData.avatar || '',
-        signature: loginInfo.signature || profileData.signature || '',
-        gender: loginInfo.gender !== undefined ? loginInfo.gender : (profileData.gender || 0),
-        birthDate: loginInfo.birthDate || profileData.birthDate || '2000-01-01',
-        school: loginInfo.school || profileData.school || ''
-      };
-      uni.setStorageSync('USER_PROFILE_DATA', JSON.stringify(user.value));
+        // 4. 合并数据 (注意顺序：默认值 -> 本地缓存 -> 登录实时数据)
+        user.value = {
+          ...defaultUser,   // 底层默认值
+          ...profileData,   // 中层用户缓存
+          
+          // --- 下面这些字段强制使用 loginInfo 的数据，确保从服务器回来的是最新的 ---
+          username: loginInfo.username,
+          nickname: loginInfo.nickname || profileData.nickname || defaultUser.nickname,
+          uid: loginInfo.uid || '未登录',
+          inviteCode: loginInfo.inviteCode || '----',
+          role: loginInfo.role,
+          boundInviteCode: loginInfo.boundInviteCode || '',
+          
+          // 等级与VIP信息
+          level: loginInfo.level || 1,
+          xp: loginInfo.xp || 0,
+          vipType: loginInfo.vipType || 'none',
+          vipExpiry: loginInfo.vipExpiry || null,
+          vipLevel: loginInfo.vipLevel || 1,
+          vipXp: loginInfo.vipXp || 0,
+          
+          // 个人资料 (优先用登录返回的最新头像/签名)
+          avatar: loginInfo.avatar || profileData.avatar || '',
+          signature: loginInfo.signature || profileData.signature || '',
+          gender: loginInfo.gender !== undefined ? loginInfo.gender : (profileData.gender || 0),
+          birthDate: loginInfo.birthDate || profileData.birthDate || '2000-01-01',
+          school: loginInfo.school || profileData.school || '',
+  
+          // === [核心修复] 社交数据映射 ===
+          // 强制覆盖，确保是数组
+          following: realFollowing, 
+          followers: realFollowers, // 如果模板用 user.followers
+          fans: realFollowers,      // 如果模板用 user.fans (兼容旧代码)
+        };
+        
+        // 5. 将最新的 user 对象写回 USER_PROFILE_DATA 缓存，保持同步
+        uni.setStorageSync('USER_PROFILE_DATA', JSON.stringify(user.value));
     };
 
   const config = globalConfig;

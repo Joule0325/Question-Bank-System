@@ -36,19 +36,31 @@ const handleSubmit = async () => {
             // 保存 Token
             uni.setStorageSync('token', res.token);
             
-            // === 修改这里：保存完整的用户信息 ===
+            // === 【核心修复】保存完整的用户信息，包含 VIP 和等级 ===
             uni.setStorageSync('user', { 
                 username: res.username,
                 role: res.role || 'user',
-                uid: res.uid,              // <--- 保存 UID
-                inviteCode: res.inviteCode // <--- 保存 邀请码
+                uid: res.uid,
+                inviteCode: res.inviteCode,
+                // 新增保存字段
+                level: res.level,
+                xp: res.xp,
+                vipType: res.vipType,
+                vipExpiry: res.vipExpiry,
+                vipLevel: res.vipLevel,
+                vipXp: res.vipXp,
+                avatar: res.avatar,
+                nickname: res.nickname
             });
-            // =================================
+            // ===============================================
         
             uni.showToast({ title: '欢迎回来', icon: 'success' });
             setTimeout(() => {
                 uni.reLaunch({ url: '/pages/index/index' });
             }, 500);
+        } else {
+             uni.showToast({ title: '注册成功，请登录', icon: 'success' });
+             isLogin.value = true;
         }
     } catch(e) {
         uni.showToast({ title: e.error || '请求失败', icon: 'none' });

@@ -467,7 +467,7 @@ watch(() => props.visible, (newVal) => {
 
 <style lang="scss" scoped>
 .export-modal-mask {
-  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); z-index: 9999;
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); z-index: 900;
   display: flex; align-items: center; justify-content: center; backdrop-filter: blur(2px);
 }
 
