@@ -6,7 +6,7 @@
 
 <script setup>
 import { computed } from 'vue';
-import { globalConfig } from '../utils/configStore.js';
+import { globalConfig } from '@/utils/configStore.js';
 
 const props = defineProps({
   text: {

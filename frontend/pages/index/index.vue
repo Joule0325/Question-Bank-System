@@ -477,7 +477,7 @@ import ExportWordModal from '@/components/ExportWordModal.vue';
 import ManageSubjectModal from '@/components/ManageSubjectModal.vue';
 import ManageContentModal from '@/components/ManageContentModal.vue';
 import QuestionBasketModal from '@/components/QuestionBasketModal.vue';
-import PersonalCenter from '@/components/PersonalCenter.vue';
+import PersonalCenter from '@/components/personal-center/PersonalCenter.vue';
 import UserHoverCard from '@/components/UserHoverCard.vue'; // 【新增引入】
 import { onLoad } from '@dcloudio/uni-app';
 import { globalConfig, formatOptionLabel, formatSubIndex } from '@/utils/configStore.js';
