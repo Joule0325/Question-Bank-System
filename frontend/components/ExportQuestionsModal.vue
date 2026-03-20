@@ -255,7 +255,8 @@ const templates = ref([
   { id: 1, name: "GEE仿真试卷(A4)" }, 
   { id: 2, name: "两栏紧凑" },
   { id: 3, name: "答题卡A3" },
-  { id: 4, name: "作业练习" }
+  { id: 4, name: "作业练习" },
+  { id: 5, name: "纯题模式(不分类)" } // [新增] 第5个模板
 ]);
 
 let imageAssets = {};
@@ -384,10 +385,15 @@ const formatOptions = (options, layoutVal, indent = '') => {
 };
 
 // --- 核心生成逻辑 ---
+// --- 核心生成逻辑 ---
+// --- 核心生成逻辑 ---
 const generateLatex = () => {
   imageAssets = {};
   
-  // 基础文档类设置
+  // 提炼一个变量，严谨判断是否为纯题模式 (模板ID 5)
+  const isPureMode = Number(selectedTplId.value) === 5;
+  
+  // 基础文档类设置 (导言区)
   let content = `\\documentclass[11pt]{ctexart}
 \\usepackage{amsmath,amssymb,bm}
 \\usepackage{graphicx}
@@ -411,7 +417,7 @@ const generateLatex = () => {
 
 % 自定义命令
 \\newcommand{\\juemi}{\\textbf{绝密 $\\bigstar$ 启用前} \\par}
-\\newcommand{\\biaoti}[1]{\\begin{center}{\\heiti\\zihao{2} #1}\\end{center}}
+\\newcommand{\\biaoti}[1]{\\begin{center}{\\kaishu\\zihao{3} #1}\\end{center}}
 \\newcommand{\\fubiaoti}[1]{\\begin{center}{\\kaishu\\zihao{3} #1}\\end{center}}
 
 % tasks 设置 (仿 GEEexam.sty)
@@ -433,7 +439,17 @@ const generateLatex = () => {
 
 \\begin{document}
 
-\\zihao{5}
+`;
+
+  // === 【关键修改】：根据不同模板生成不同的卷头 ===
+  if (isPureMode) {
+      // 纯题模式：只保留主副标题，去掉“绝密”和“注意事项”
+      content += `\\biaoti{${cleanTex(titles.main)}}\n`;
+      if (titles.sub) content += `\\fubiaoti{${cleanTex(titles.sub)}}\n`;
+      content += `\\vspace{1.5em}\n`;
+  } else {
+      // 经典模式：保留完整的考试卷头
+      content += `\\zihao{5}
 \\juemi
 \\biaoti{${cleanTex(titles.main)}}
 \\fubiaoti{${cleanTex(titles.sub)}}
@@ -447,6 +463,7 @@ const generateLatex = () => {
 
 \\vspace{1em}
 `;
+  }
 
   // 分组逻辑
   const groupMap = {
@@ -466,7 +483,6 @@ const generateLatex = () => {
               else if (q.type.includes('填空')) type = 'fill';
               else if (q.type.includes('解答') || q.type.includes('简答')) type = 'subjective';
           } else {
-             // 兜底推断
              if (q.options && Object.keys(q.options).length > 0) type = 'choice';
              else type = 'subjective';
           }
@@ -480,14 +496,14 @@ const generateLatex = () => {
   // 生成器函数
   const generateSection = (title, qList) => {
       if (qList.length === 0) return '';
-      // 使用缩进让源码好看
-      let secTex = `\\section*{${title}}\n\\begin{enumerate}[leftmargin=1.7em, start=${qCounter + 1}]\n`;
+      
+      let secTex = title ? `\\section*{${title}}\n` : '';
+      secTex += `\\begin{enumerate}[leftmargin=1.7em, start=${qCounter + 1}]\n`;
       
       qList.forEach((q) => {
           qCounter++;
           secTex += `\t\\item `;
           
-          // 属性
           let attrStr = '';
           if (metadata.year || metadata.province || metadata.difficulty) {
               let parts = [];
@@ -500,19 +516,15 @@ const generateLatex = () => {
           const qTitle = processContent(q.title || '', (n, u) => imageAssets[n] = u);
           secTex += `${attrStr}${qTitle}\n`;
 
-          // 选项 (大题) - 增加缩进
           if (q.options) {
               secTex += formatOptions(q.options, q.optionLayout, '\t') + '\n';
           }
 
-          // 小题 (使用 enumerate + tasks)
           if (q.subQuestions && q.subQuestions.length > 0) {
-              secTex += `\t\\begin{enumerate}[label=(\\arabic*)]\n`; // 增加子题号 (1)(2)
+              secTex += `\t\\begin{enumerate}[label=(\\arabic*)]\n`;
               q.subQuestions.forEach(sub => {
                   const subContent = processContent(sub.content || '', (n, u) => imageAssets[n] = u);
                   secTex += `\t\t\\item ${subContent}\n`;
-                  
-                  // 关键修复：只要有options，就调用 formatOptions 生成 tasks
                   if (sub.options) {
                       secTex += formatOptions(sub.options, sub.optionLayout, '\t\t') + '\n';
                   }
@@ -520,7 +532,6 @@ const generateLatex = () => {
               secTex += `\t\\end{enumerate}\n`;
           }
 
-          // 答案位置：每题之后
           if (answerPos.value === 'question') {
              let extras = buildAnswerBlock(q);
              if (extras.length > 0) {
@@ -535,18 +546,37 @@ const generateLatex = () => {
       return secTex;
   };
 
-  content += generateSection('一、选择题', groupMap.choice.list);
-  content += generateSection('二、多选题', groupMap.multiple_choice.list);
-  content += generateSection('三、填空题', groupMap.fill.list);
-  content += generateSection('四、解答题', groupMap.subjective.list);
-  content += generateSection('五、其他试题', groupMap.other.list);
+  // === 【排版拼接分流】 ===
+  if (isPureMode) {
+      // 纯题模式：没有分类标题，直接按原始顺序循环所有题目
+      content += generateSection('', props.questions);
+  } else {
+      // 经典模式：按照类型分开渲染
+      content += generateSection('一、选择题', groupMap.choice.list);
+      content += generateSection('二、多选题', groupMap.multiple_choice.list);
+      content += generateSection('三、填空题', groupMap.fill.list);
+      content += generateSection('四、解答题', groupMap.subjective.list);
+      content += generateSection('五、其他试题', groupMap.other.list);
+  }
 
   // 答案位置：文末
   if (answerPos.value === 'end' && props.questions.length > 0) {
       if (contentSettings.answer || contentSettings.analysis || contentSettings.detailed) {
           content += `\\newpage\n\\section*{参考答案}\n`;
+          
+          // 这里的顺序需要和上面生成试卷的顺序严格保持一致
           let allQs = [];
-          Object.values(groupMap).forEach(g => allQs = allQs.concat(g.list));
+          if (isPureMode) {
+              allQs = props.questions;
+          } else {
+              allQs = [
+                  ...groupMap.choice.list,
+                  ...groupMap.multiple_choice.list,
+                  ...groupMap.fill.list,
+                  ...groupMap.subjective.list,
+                  ...groupMap.other.list
+              ];
+          }
           
           allQs.forEach((q, idx) => {
               let extras = buildAnswerBlock(q);

@@ -11,9 +11,6 @@
         <view class="header-info" v-else><view></view></view>
 
         <view class="header-btns">
-            <button class="menu-btn" style="color: #7c3aed; border-color: #7c3aed; margin-right: 15px;" @click="openOCRModal">
-                ✨ 智能识别
-            </button>
             <button class="menu-btn primary" @click="handleSave">保存</button>
             <button class="menu-btn" @click="close">退出</button>
             <button class="menu-btn outline" @click="handleSaveAndExit">保存并退出</button>

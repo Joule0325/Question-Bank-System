@@ -10,14 +10,6 @@
           <image src="/static/icons/题库.svg" class="nav-icon-img" mode="aspectFit"></image>
           <text class="nav-txt">题库</text>
         </view>
-        <view class="nav-item" :class="{active: activeTab==='class'}" @click="activeTab='class'">
-          <image src="/static/icons/白板.svg" class="nav-icon-img" mode="aspectFit"></image>
-          <text class="nav-txt">白板</text>
-        </view>
-        <view class="nav-item" :class="{active: activeTab==='resources'}" @click="activeTab='resources'">
-          <image src="/static/icons/资源.svg" class="nav-icon-img" mode="aspectFit"></image>
-          <text class="nav-txt">资源</text>
-        </view>
         
         <view class="nav-item" :class="{active: activeTab==='my'}" @click="activeTab='my'" style="margin-top: auto;">
           <image src="/static/icons/我的.svg" class="nav-icon-img" mode="aspectFit"></image>
@@ -253,9 +245,8 @@
                           <text class="op-btn green" @click="openForkModal(q)">+ 加入我的题库</text>
                       </block>
                   </template>
-                  
+				  
                   <template v-else>
-                      <text class="op-btn purple" @click="openPublishModal(q)">⬆ 上传</text>
                       <text class="op-btn blue" @click="openEditModal(q)">编辑</text>
                       <text class="op-btn red" @click="handleDelete(q.id)">删除</text>
                   </template>
@@ -376,11 +367,6 @@
       </view>
     </view>
 
-    <view class="main-workspace" v-else-if="activeTab === 'class'">
-        <view class="whiteboard-wrapper">
-            <Whiteboard></Whiteboard>
-        </view>
-    </view>
 
     <view class="main-workspace" v-else-if="activeTab === 'my'">
         <view class="my-wrapper" style="padding: 0; height: 100%; box-sizing: border-box; background-color: #f8fafc;">
@@ -470,7 +456,6 @@ import { request } from '@/utils/request.js';
 import { getQuestions, deleteQuestion } from '@/api/question.js';
 import CategoryTree from '@/components/CategoryTree.vue';
 import LatexText from '@/components/LatexText.vue';
-import Whiteboard from '@/components/Whiteboard.vue';
 import AddQuestionModal from '@/components/AddQuestionModal.vue';
 import ExportQuestionsModal from '@/components/ExportQuestionsModal.vue';
 import ExportWordModal from '@/components/ExportWordModal.vue';
@@ -545,7 +530,7 @@ const provinceOptions = ref([ "全国", "北京", "天津", "上海", "重庆", 
 const modeOptions = ref([
   { label: '私人空间', value: 'private' },
   { label: '官方空间', value: 'public' },
-  { label: '公共空间', value: 'community' } // 【新增】
+  // { label: '公共空间', value: 'community' } // 【新增】
 ]);
 
 const catSearch = ref('');
