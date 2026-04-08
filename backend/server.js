@@ -7,42 +7,19 @@ import path from 'path';
 import fs from 'fs';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-import { spawn } from 'child_process'; 
+import { spawn, exec } from 'child_process'; 
 import axios from 'axios';
 import AdmZip from 'adm-zip';
-import { pipeline } from 'stream';
-import { promisify } from 'util';
 import os from 'os';
 // 如果您需要 Jimp 处理图片，保留它；如果只用 MinerU/Python 也可以移除，这里保留以防万一
 import { Jimp } from 'jimp'; 
-import { exec } from 'child_process';
 
 const app = express();
 const PORT = 3001;
 const SECRET_KEY = 'YOUR_SECRET_KEY_CHANGE_THIS_IN_PROD'; 
 
 // ==========================================
-// === 配置区域 ===
-// ==========================================
-
-// 1. Qwen 配置 (保留)
-const DASHSCOPE_API_KEY = 'sk-8a2cd122b7e442969aad0f1516ee68b5'; 
-
-// 2. DeepSeek 配置 (保留)
-const DEEPSEEK_API_KEY = 'sk-3mmdOmu0ssmYBLdKA75112417853451c8dE38e4602C0246f';
-const DEEPSEEK_BASE_URL = 'https://dpapi.cn/v1/chat/completions';
-const DEEPSEEK_MODEL_NAME = 'deepseek-v3'; 
-
-// 3. [新增] Gemini 配置
-const GEMINI_API_KEY = 'sk-MUVHHC0GN2AbXxokvqftsIXhceneed4l5Wbno00pJIopJN6J';
-// 假设您是在同一平台(dpapi)购买的 Key，如果不是，请更换此前缀
-const GEMINI_BASE_URL = 'https://api.vectorengine.ai/v1/chat/completions';
-const GEMINI_MODEL_NAME = 'gemini-2.5-pro';
-
-// 4. MinerU 配置 (保留)
-const MINERU_API_KEY = 'eyJ0eXBlIjoiSldUIiwiYWxnIjoiSFM1MTIifQ.eyJqdGkiOiI3NDcwMDYzNyIsInJvbCI6IlJPTEVfUkVHSVNURVIiLCJpc3MiOiJPcGVuWExhYiIsImlhdCI6MTc2OTYyMTE5MywiY2xpZW50SWQiOiJsa3pkeDU3bnZ5MjJqa3BxOXgydyIsInBob25lIjoiIiwib3BlbklkIjpudWxsLCJ1dWlkIjoiZDM1ZjNiMmItYjkxZS00ZmFlLWFmYjktM2Q0ZDkyYmFiNDM0IiwiZW1haWwiOiIiLCJleHAiOjE3NzA4MzA3OTN9.40ED1BasedSGBRIZnBNJKhXu739Rk35RSlK3GLQN61Cb1wb3FTur16Z0SmaW5r3SPSrtauPFLxP4_YRPIkvUUw';
-const MINERU_BASE_URL = 'https://mineru.net/api/v4';
-
+// === VIP 权益配置 ===
 // ==========================================
 const VIP_RIGHTS = {
     none: { 
@@ -52,44 +29,26 @@ const VIP_RIGHTS = {
         ocrLimit: 0,
         answerViewLimit: 30,
         subjectLimit: 1,      
-        basketCapacity: 10    // [新增] 试题栏总容量 10题
-    },
-    diamond: { 
-        name: '钻石会员',
-        maxQuestions: 30000, 
-        exportLimit: 20, 
-        ocrLimit: 0,
-        answerViewLimit: 1000, 
-        subjectLimit: 3,      
-        basketCapacity: 100   // [新增] 试题栏总容量 100题
-    },
-    blackgold: { 
-        name: '黑金会员',
-        maxQuestions: 90000, 
-        exportLimit: 50, 
-        ocrLimit: 15, 
-        answerViewLimit: 100000, 
-        subjectLimit: 7,      
-        basketCapacity: 200   // [新增] 试题栏总容量 200题
+        basketCapacity: 10    // 试题栏总容量 10题
     },
     svip: { 
-        name: '机构尊享',
+        name: '机构尊享(管理员)',
         maxQuestions: 999999, 
-        exportLimit: 9999, 
-        ocrLimit: 9999, 
+        exportLimit: 9999,
+        ocrLimit: 9999,
         answerViewLimit: 999999, 
         subjectLimit: 999,
-        basketCapacity: 9999  // 无限
+        basketCapacity: 9999  
     }
 };
 
 // ==========================================
 // === 工具函数 ===
 // ==========================================
-// [修改] 生成 4 位纯数字 UID (范围 1000-9999)
+// 生成 4 位纯数字 UID (范围 1000-9999)
 const generateUid = () => Math.floor(1000 + Math.random() * 9000).toString();
 
-// [修改] 生成 6 位纯大写字母邀请码 (无数字)
+// 生成 6 位纯大写字母邀请码 (无数字)
 const generateInviteCode = () => {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
     let result = '';
@@ -97,6 +56,18 @@ const generateInviteCode = () => {
         result += chars.charAt(Math.floor(Math.random() * chars.length));
     }
     return result;
+};
+
+const getStrLen = (str) => {
+    let len = 0;
+    for (let i = 0; i < str.length; i++) {
+        if (str.charCodeAt(i) > 127) { 
+            len += 2; 
+        } else { 
+            len++; 
+        }
+    }
+    return len;
 };
 
 // ==========================================
@@ -159,8 +130,6 @@ const upload = multer({ storage: storage });
 // ==========================================
 // === 数据库 Schema 定义 ===
 // ==========================================
-
-// 【修改点】包含所有字段 (基础信息 + 等级 + 会员 + VIP等级 + 权益限制)
 const UserSchema = new mongoose.Schema({
     username: { type: String, required: true, unique: true },
     password: { type: String, required: true },
@@ -185,33 +154,26 @@ const UserSchema = new mongoose.Schema({
     vipExpiry: { type: Date },
     
     // --- VIP 荣誉等级 (长期积累) ---
-    vipLevel: { type: Number, default: 1 }, // VIP1 - VIP12
-    vipXp: { type: Number, default: 0 },     // VIP 经验池
+    vipLevel: { type: Number, default: 1 }, 
+    vipXp: { type: Number, default: 0 },    
 
-    // 存储粉丝的 User ID
     followers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }], 
-    // 存储关注的人的 User ID
     following: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
 
-    // === [新增] 隐私设置 ===
     settings: {
-        // 题库展示范围: 'all'(所有人), 'followers'(粉丝), 'friends'(互关好友), 'private'(仅自己)
         questionVisibility: { type: String, default: 'all' },
-        // 展示哪些题目: 'all'(所有题目), 'public'(仅公共空间题目)
         questionScope: { type: String, default: 'public' } 
     },
 
-    // --- [新增] 安全与限额字段 ---
-    lastLoginTime: { type: Number, default: 0 }, // 用于单点登录互斥
+    lastLoginTime: { type: Number, default: 0 }, 
     
     dailyUsage: {
-        date: String,          // 记录当前日期 (YYYY-MM-DD)
-        exportCount: { type: Number, default: 0 }, // 导出次数
-        ocrCount: { type: Number, default: 0 },    // OCR次数
-        answerViewCount: { type: Number, default: 0 } // 查看答案次数
+        date: String,          
+        exportCount: { type: Number, default: 0 }, 
+        ocrCount: { type: Number, default: 0 },    
+        answerViewCount: { type: Number, default: 0 } 
     },
     
-    // 兼容旧的活跃度统计
     dailyStats: {
         date: String,
         inputCount: { type: Number, default: 0 },
@@ -240,8 +202,6 @@ const QuestionSchema = new mongoose.Schema({
         options: { type: Map, of: String }, optionLayout: Number,
         answer: String, analysis: String, detailed: String
     }],
-    // === [新增] 是否为官方题目 ===
-    // true=官方空间, false=公共空间(用户上传), undefined=旧数据
     isOfficial: { type: Boolean, default: false } 
 });
 QuestionSchema.set('toJSON', { virtuals: true, versionKey: false, transform: (doc, ret) => { ret.id = ret._id.toString(); delete ret._id; } });
@@ -251,27 +211,30 @@ const Subject = mongoose.model('Subject', SubjectSchema);
 const Category = mongoose.model('Category', CategorySchema);
 const Question = mongoose.model('Question', QuestionSchema);
 
-// --- 普通等级配置 (3年满级) ---
-const LEVEL_THRESHOLDS = [0, 5000, 20000, 80000, 200000, 400000, 600000];
+// === 学科计数器 Schema ===
+const CounterSchema = new mongoose.Schema({
+    subjectId: { type: String, required: true, unique: true },
+    seq: { type: Number, default: 0 }
+});
+const Counter = mongoose.model('Counter', CounterSchema);
 
-// --- [新增] VIP等级配置 (10年满级) ---
-const VIP_THRESHOLDS = [
-    0,      // VIP 1
-    300,    // VIP 2
-    1000,   // VIP 3
-    2500,   // VIP 4
-    5000,   // VIP 5
-    8500,   // VIP 6
-    13000,  // VIP 7
-    18000,  // VIP 8
-    23500,  // VIP 9
-    29500,  // VIP 10
-    36000,  // VIP 11
-    45000   // VIP 12
-];
+const getNextQuestionId = async (subjectId) => {
+    if (!subjectId) return '0000000';
+    const counter = await Counter.findOneAndUpdate(
+        { subjectId: subjectId },
+        { $inc: { seq: 1 } },
+        { new: true, upsert: true }
+    );
+    return String(counter.seq - 1).padStart(7, '0');
+};
+
+// ==========================================
+// === 经验与等级规则配置 ===
+// ==========================================
+const LEVEL_THRESHOLDS = [0, 5000, 20000, 80000, 200000, 400000, 600000];
+const VIP_THRESHOLDS = [0, 300, 1000, 2500, 5000, 8500, 13000, 18000, 23500, 29500, 36000, 45000];
 
 const XP_RULES = {
-    // 普通经验 (活跃度)
     LOGIN: 50,           
     LOGIN_DIAMOND: 100,  
     LOGIN_BLACKGOLD: 200,
@@ -279,40 +242,39 @@ const XP_RULES = {
     FAV: 10,             
     DAILY_INPUT_MAX: 10, 
     DAILY_XP_CAP: 1000,
-
-    // [新增] VIP经验 (仅会员登录获取)
-    VIP_LOGIN_DIAMOND: 5,   // 钻石每日 +5
-    VIP_LOGIN_BLACKGOLD: 10 // 黑金每日 +10
+    VIP_LOGIN_DIAMOND: 5
 };
 
-// ==========================================
-// === 核心辅助函数：获取当前有效权益 ===
-// ==========================================
 const getCurrentRights = (user) => {
     let type = 'none';
-    // 检查会员是否有效
     if (user.vipType && user.vipType !== 'none' && user.vipExpiry) {
         if (new Date(user.vipExpiry) > new Date()) {
             type = user.vipType;
         }
     }
-    // 如果是 admin，直接给 svip 权限
+    
     if (user.role === 'admin') type = 'svip';
     
-    // 容错：如果数据库存了未知类型，回退到 none
+    if (type === 'diamond') {
+        const vLevel = user.vipLevel || 1; 
+        return {
+            name: `钻石会员 V${vLevel}`,
+            maxQuestions: 1000 + (vLevel - 1) * 1000,
+            exportLimit: 20 + (vLevel - 1) * 5,
+            answerViewLimit: 100 + (vLevel - 1) * 50,
+            subjectLimit: 3 + (vLevel - 1) * 1,
+            basketCapacity: 100 + (vLevel - 1) * 20
+        };
+    }
+    
     return VIP_RIGHTS[type] || VIP_RIGHTS['none'];
 };
 
-// ==========================================
-// === 核心辅助函数：检查每日限额 ===
-// ==========================================
-const checkDailyLimit = async (user, actionKey) => { // actionKey: 'exportLimit', 'ocrLimit'
+const checkDailyLimit = async (user, actionKey) => { 
     const today = new Date().toISOString().split('T')[0];
     
-    // 初始化 dailyUsage
     if (!user.dailyUsage) user.dailyUsage = {};
 
-    // 如果日期变化，重置计数
     if (user.dailyUsage.date !== today) {
         user.dailyUsage.date = today;
         user.dailyUsage.exportCount = 0;
@@ -323,7 +285,6 @@ const checkDailyLimit = async (user, actionKey) => { // actionKey: 'exportLimit'
     const rights = getCurrentRights(user);
     const limit = rights[actionKey];
     
-    // 映射当前计数值
     let currentCount = 0;
     if (actionKey === 'exportLimit') currentCount = user.dailyUsage.exportCount;
     if (actionKey === 'ocrLimit') currentCount = user.dailyUsage.ocrCount;
@@ -332,53 +293,41 @@ const checkDailyLimit = async (user, actionKey) => { // actionKey: 'exportLimit'
         throw new Error(`今日${actionKey === 'exportLimit' ? '导出' : 'OCR识别'}次数已耗尽 (${currentCount}/${limit})，请升级会员`);
     }
     
-    return user; // 返回 user 对象以便后续保存
+    return user; 
 };
 
-// --- [新增] 经验值处理核心逻辑 ---
 const addExperience = async (userId, type) => {
     const user = await User.findById(userId);
     if (!user) return null;
 
     const todayStr = new Date().toISOString().split('T')[0];
     
-    // 1. 检查是否需要重置每日统计
     if (!user.dailyStats || user.dailyStats.date !== todayStr) {
         user.dailyStats = { date: todayStr, inputCount: 0, totalXP: 0 };
     }
 
-    // 2. 检查每日总上限
     if (user.dailyStats.totalXP >= XP_RULES.DAILY_XP_CAP) return user;
 
     let xpGain = 0;
 
-    // 3. 根据类型计算经验
     if (type === 'login') {
-        // 每日首次交互(登录)才加分
         if (user.dailyStats.totalXP === 0) {
-            // A. 计算普通活跃经验
             let loginXP = XP_RULES.LOGIN;
-            let vipDailyGain = 0; // VIP经验增量
+            let vipDailyGain = 0; 
 
             const now = new Date();
             if (user.vipType && user.vipType !== 'none' && user.vipExpiry) {
-                // 检查会员是否过期
                 if (new Date(user.vipExpiry) > now) {
-                    if (user.vipType === 'blackgold') {
-                        loginXP = XP_RULES.LOGIN_BLACKGOLD;
-                        vipDailyGain = XP_RULES.VIP_LOGIN_BLACKGOLD; // 黑金 +10
-                    } else if (user.vipType === 'diamond') {
+                    if (user.vipType === 'diamond') { 
                         loginXP = XP_RULES.LOGIN_DIAMOND;
-                        vipDailyGain = XP_RULES.VIP_LOGIN_DIAMOND;   // 钻石 +5
+                        vipDailyGain = XP_RULES.VIP_LOGIN_DIAMOND;
                     }
                 }
             }
             xpGain = loginXP;
 
-            // B. [新增] 结算 VIP 经验与等级 (独立于普通经验)
             if (vipDailyGain > 0) {
                 user.vipXp = (user.vipXp || 0) + vipDailyGain;
-                // 计算新的 VIP 等级
                 let newVipLevel = 1;
                 for (let i = VIP_THRESHOLDS.length - 1; i >= 0; i--) {
                     if (user.vipXp >= VIP_THRESHOLDS[i]) {
@@ -386,7 +335,6 @@ const addExperience = async (userId, type) => {
                         break;
                     }
                 }
-                // 只能升不能降
                 if (newVipLevel > (user.vipLevel || 1)) {
                     user.vipLevel = newVipLevel;
                 }
@@ -407,7 +355,6 @@ const addExperience = async (userId, type) => {
         user.xp = (user.xp || 0) + xpGain;
         user.dailyStats.totalXP += xpGain;
 
-        // 4. 计算等级
         let newLevel = 1;
         for (let i = LEVEL_THRESHOLDS.length - 1; i >= 0; i--) {
             if (user.xp >= LEVEL_THRESHOLDS[i]) {
@@ -421,7 +368,9 @@ const addExperience = async (userId, type) => {
     return user;
 };
 
-// 辅助函数
+// ==========================================
+// === 辅助函数 ===
+// ==========================================
 const buildTree = (items) => {
     const map = {}; const roots = [];
     items.forEach(item => { map[item.id] = { ...item, children: [] }; });
@@ -462,7 +411,7 @@ const syncCategoriesRecursive = async (nodes, parentId, subjectId, userId, isPub
 };
 
 // ==========================================
-// === 鉴权中间件 (含单点登录互斥逻辑) ===
+// === 鉴权中间件 ===
 // ==========================================
 const authenticateToken = (req, res, next) => {
     const token = req.headers['authorization']?.split(' ')[1];
@@ -471,384 +420,23 @@ const authenticateToken = (req, res, next) => {
         jwt.verify(token, SECRET_KEY, async (err, decoded) => {
             if (err) return res.status(403).json({ error: 'Token 无效' });
             
-            // 查询数据库获取最新状态
             const user = await User.findById(decoded.userId);
             if (!user) return res.status(401).json({ error: '用户不存在' });
 
-            // [新增] 单点登录检查：比较 Token 签发时间与数据库 lastLoginTime
             if (decoded.loginTime && user.lastLoginTime && decoded.loginTime !== user.lastLoginTime) {
                 return res.status(401).json({ error: '您的账号已在其他设备登录，请重新登录' });
             }
 
-            req.user = user; // 挂载完整的 mongoose document
-            req.user.userId = user._id.toString(); // 兼容旧代码引用
+            req.user = user; 
+            req.user.userId = user._id.toString(); 
             next();
         });
     } else next();
 };
 
-// ============================================================
-// === 智能 OCR 核心 (Prompt 深度优化版) ===
-// ============================================================
-
-const SYSTEM_PROMPT = `
-你是一个专业的试题录入助手，负责将图片中的试题内容精准识别并转换为指定格式。
-请严格遵守以下规则，直接输出结果，**禁止**输出任何解释性语言，**禁止**输出原图片没有的内容。
-
-【核心规则】
-
-1. **题型与结构**：
-   - **选择题**：必须使用 "##选项 N" 标签。其中 **N** 代表一行显示的选项数量（如 1, 2, 4），请根据图片排版自动判断。
-   - **解答/综合题**：若包含多个子问题（如 (1), (2)），必须为每个子问题前添加 "##小题" 标签，然后"##题干"标签用来放题干内容。
-   - **嵌套选择题**：若小题内部为选择题，同样需使用 "##选项" 标签。
-   - **严禁**将“选项”（A/B/C/D）识别为“小题”。
-
-2. **分隔规范**：
-   - 不同题目之间（即题号变化时），使用 "===" 进行分隔。
-
-3. **排版与换行**：
-   - **普通换行**：文本内部换行使用 <br> 标签，且 <br> 必须单独占一行。
-   - **特殊排版**：
-     - **大标题**：使用 "[居中] " 前缀。
-     - **段落**：使用 "[缩进] " 前缀（用于语文、英语文章段落）。
-     - **冲突规则**：如果一行以 "[居中]" 或 "[缩进]" 开头，则该行上方**不需要**再加 <br> 标签。
-   - **公式间距**：若行内包含大型数学符号（如 \\dfrac, \\int, \\sum），请将整行包裹在 <div style="margin: 10px 0;">...</div> 中以增加行间距。
-
-4. **数学公式规范**：
-   - 分数默认使用 \\dfrac{}{}。
-   - 仅在上下标（如指数、脚标）内部使用 \\tfrac{}{}。
-
-5. **非文本元素**：
-   - 图片/插图位置填写：[图片占位]。
-
-6. **答案录入逻辑**：
-   - 仅在明确识别到答案内容时才录入内容。
-   - 若未识别到答案，保留 "##答案" 标签，但内容留空。
-`;
-
-// 1. Python 转图
-function convertPdfToImages(pdfPath) {
-    return new Promise((resolve, reject) => {
-        const pythonProcess = spawn('python3', ['pdf_converter.py', 'render', pdfPath, pdfImagesDir]);
-        let dataString = '';
-        pythonProcess.stdout.on('data', (data) => { dataString += data.toString(); });
-        pythonProcess.on('close', (code) => {
-            if (code !== 0) return reject(new Error(`Python exit code ${code}`));
-            try {
-                const result = JSON.parse(dataString);
-                if (result.success) resolve(result.images);
-                else reject(new Error(result.error));
-            } catch (e) { reject(new Error('Python output parse error')); }
-        });
-    });
-}
-
-// 2. Qwen-VL 识别
-async function callQwenVL(imagePath) {
-    try {
-        const base64Image = fs.readFileSync(imagePath).toString('base64');
-        const response = await axios.post(
-            'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation',
-            {
-                model: 'qwen-vl-max',
-                max_tokens: 81920,
-                temperature: 0.1,
-                input: {
-                    messages: [
-                        { role: 'user', content: [{ image: `data:image/jpeg;base64,${base64Image}` }, { text: SYSTEM_PROMPT }] }
-                    ]
-                },
-                parameters: { result_format: 'message' }
-            },
-            {
-                headers: { 'Authorization': `Bearer ${DASHSCOPE_API_KEY}`, 'Content-Type': 'application/json' },
-                timeout: 180000 
-            }
-        );
-        if (response.data.output?.choices) {
-            let text = response.data.output.choices[0].message.content[0].text;
-            return text.replace(/^```.*$/gm, '').replace(/```/g, '').trim();
-        }
-        return null;
-    } catch (e) {
-        console.error(`[Qwen] Error processing ${path.basename(imagePath)}:`, e.message);
-        return null;
-    }
-}
-
-// 3. DeepSeek 流式输出
-async function streamDeepSeek(imagePath, res) {
-    try {
-        const base64Image = fs.readFileSync(imagePath).toString('base64');
-        const response = await axios.post(
-            DEEPSEEK_BASE_URL,
-            {
-                model: DEEPSEEK_MODEL_NAME, 
-                messages: [
-                    { 
-                        role: 'user', 
-                        content: [
-                            { type: 'text', text: SYSTEM_PROMPT },
-                            { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
-                        ] 
-                    }
-                ],
-                stream: true
-            },
-            {
-                headers: { 
-                    'Authorization': `Bearer ${DEEPSEEK_API_KEY}`, 
-                    'Content-Type': 'application/json' 
-                },
-                responseType: 'stream',
-                timeout: 180000
-            }
-        );
-
-        return new Promise((resolve, reject) => {
-            let buffer = '';
-            response.data.on('data', (chunk) => {
-                console.log('DeepSeek返回:', chunk.toString()); // Log修正为DeepSeek
-                buffer += chunk.toString();
-                const lines = buffer.split('\n');
-                buffer = lines.pop(); // 保留未完整的行
-
-                for (const line of lines) {
-                    if (line.trim() === 'data: [DONE]') continue;
-                    if (line.startsWith('data: ')) {
-                        try {
-                            const json = JSON.parse(line.slice(6));
-                            const content = json.choices[0]?.delta?.content || '';
-                            if (content) {
-                                res.write(`data: ${JSON.stringify({ t: 'txt', c: content })}\n\n`);
-                            }
-                        } catch (e) {}
-                    }
-                }
-            });
-            response.data.on('end', () => resolve());
-            response.data.on('error', (err) => reject(err));
-        });
-    } catch (e) {
-        let errMsg = e.message;
-        if (e.response) errMsg += ` (Status: ${e.response.status})`;
-        console.error(`[DeepSeek] Stream Error:`, errMsg);
-        res.write(`data: ${JSON.stringify({ t: 'err', c: 'DeepSeek Error: ' + errMsg })}\n\n`);
-        return null; 
-    }
-}
-
-// 4. [新增] Gemini 流式输出
-async function streamGemini(imagePath, res) {
-    try {
-        const base64Image = fs.readFileSync(imagePath).toString('base64');
-        const response = await axios.post(
-            GEMINI_BASE_URL,
-            {
-                model: GEMINI_MODEL_NAME, 
-                max_tokens: 81920,
-                temperature: 0.1,
-                messages: [
-                    { 
-                        role: 'user', 
-                        content: [
-                            { type: 'text', text: SYSTEM_PROMPT },
-                            { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
-                        ] 
-                    }
-                ],
-                stream: true
-            },
-            {
-                headers: { 
-                    'Authorization': `Bearer ${GEMINI_API_KEY}`, 
-                    'Content-Type': 'application/json' 
-                },
-                responseType: 'stream',
-                timeout: 180000
-            }
-        );
-
-        return new Promise((resolve, reject) => {
-            let buffer = '';
-            response.data.on('data', (chunk) => {
-                buffer += chunk.toString();
-                const lines = buffer.split('\n');
-                buffer = lines.pop(); 
-
-                for (const line of lines) {
-                    if (line.trim() === 'data: [DONE]') continue;
-                    if (line.startsWith('data: ')) {
-                        try {
-                            const json = JSON.parse(line.slice(6));
-                            const content = json.choices[0]?.delta?.content || '';
-                            if (content) {
-                                res.write(`data: ${JSON.stringify({ t: 'txt', c: content })}\n\n`);
-                            }
-                        } catch (e) {}
-                    }
-                }
-            });
-            response.data.on('end', () => resolve());
-            response.data.on('error', (err) => reject(err));
-        });
-    } catch (e) {
-        let errMsg = e.message;
-        if (e.response) errMsg += ` (Status: ${e.response.status})`;
-        console.error(`[Gemini] Stream Error:`, errMsg);
-        res.write(`data: ${JSON.stringify({ t: 'err', c: 'Gemini Error: ' + errMsg })}\n\n`);
-        return null; 
-    }
-}
-
-// 5. MinerU 批量提取
-async function runMinerUBatch(imagePaths) {
-    try {
-        if (!imagePaths || imagePaths.length === 0) return {};
-        console.log(`[MinerU] Batch processing ${imagePaths.length} images...`);
-
-        const filesMeta = imagePaths.map(p => ({
-            name: path.basename(p),
-            size: fs.statSync(p).size
-        }));
-
-        const urlRes = await axios.post(`${MINERU_BASE_URL}/file-urls/batch`, { 
-            language: 'ch', files: filesMeta
-        }, { headers: { Authorization: `Bearer ${MINERU_API_KEY}` } });
-
-        const { file_urls, batch_id } = urlRes.data.data;
-
-        await Promise.all(file_urls.map((uploadUrl, i) => {
-            const buffer = fs.readFileSync(imagePaths[i]);
-            return axios.put(uploadUrl, buffer, { 
-                headers: { 'Content-Type': '', 'Content-Length': filesMeta[i].size } 
-            });
-        }));
-
-        await axios.post(`${MINERU_BASE_URL}/extract/task/batch`, { 
-            language: 'ch', files: filesMeta.map(f => ({ name: f.name, is_ocr: true })) 
-        }, { headers: { Authorization: `Bearer ${MINERU_API_KEY}` } });
-
-        console.log(`[MinerU] Batch ID: ${batch_id}`);
-
-        let finalImages = {};
-        let completedFiles = new Set();
-
-        for (let i = 0; i < 40; i++) { 
-            await new Promise(r => setTimeout(r, 2500));
-            const statusRes = await axios.get(`${MINERU_BASE_URL}/extract-results/batch/${batch_id}`, { 
-                headers: { Authorization: `Bearer ${MINERU_API_KEY}` } 
-            });
-            const results = statusRes.data.data.extract_result;
-            
-            for (const item of results) {
-                if (item.state === 'done' && !completedFiles.has(item.file_name)) {
-                    completedFiles.add(item.file_name);
-                    const zipRes = await axios.get(item.full_zip_url, { responseType: 'arraybuffer' });
-                    const zip = new AdmZip(Buffer.from(zipRes.data));
-                    
-                    zip.getEntries().forEach(entry => {
-                        if (entry.entryName.includes('images/') && entry.entryName.match(/\.(jpg|jpeg|png)$/i) && !entry.isDirectory) {
-                            const newName = `mineru_${Date.now()}_${path.basename(entry.entryName)}`;
-                            fs.writeFileSync(path.join(uploadDir, newName), entry.getData());
-                            const imgId = 'IMG_' + Math.random().toString(36).substr(2, 5).toUpperCase();
-                            finalImages[imgId] = `http://localhost:3001/uploads/${newName}`;
-                        }
-                    });
-                }
-            }
-            if (completedFiles.size === imagePaths.length) break;
-        }
-        return finalImages;
-    } catch (e) {
-        console.error('[MinerU] Batch Error:', e.message);
-        return {};
-    }
-}
-
-// === 主接口 ===
-app.post('/api/smart-ocr', authenticateToken, upload.single('file'), async (req, res) => {
-    req.setTimeout(0); 
-    
-    if (!req.file) return res.status(400).json({ error: 'No file' });
-    
-    // 设置 SSE 头部
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    
-    const filePath = req.file.path; 
-    const isPdf = req.file.mimetype === 'application/pdf';
-    // 前端如果传 'Gemini'，则使用 Gemini 模型
-    const model = req.query.model || req.body.model || 'Qwen'; 
-    
-    try {
-        // === [新增] OCR 次数限额检查 ===
-        await checkDailyLimit(req.user, 'ocrLimit');
-        req.user.dailyUsage.ocrCount += 1;
-        await req.user.save();
-        // ==============================
-
-        res.write(`data: ${JSON.stringify({ t: 'status', c: 'Starting processing...' })}\n\n`);
-        console.log(`[Smart-OCR] Start: ${req.file.filename} using ${model}`);
-        
-        let targetImages = [];
-        if (isPdf) {
-            res.write(`data: ${JSON.stringify({ t: 'status', c: 'Converting PDF to images...' })}\n\n`);
-            targetImages = await convertPdfToImages(filePath);
-        } else {
-            targetImages = [filePath];
-        }
-
-        // MinerU 任务
-        const mineruTask = runMinerUBatch(targetImages).then(imgs => {
-            if (Object.keys(imgs).length > 0) {
-                res.write(`data: ${JSON.stringify({ t: 'imgs', d: imgs })}\n\n`);
-            }
-        });
-
-        // LLM 任务
-        const llmTask = (async () => {
-            for (let i = 0; i < targetImages.length; i++) {
-                const imgPath = targetImages[i];
-                if (targetImages.length > 1) {
-                    res.write(`data: ${JSON.stringify({ t: 'txt', c: i > 0 ? '\n\n===\n\n' : '' })}\n\n`);
-                    res.write(`data: ${JSON.stringify({ t: 'status', c: `Processing page ${i + 1}/${targetImages.length}...` })}\n\n`);
-                }
-
-                if (model === 'DeepSeek') {
-                    await streamDeepSeek(imgPath, res);
-                } else if (model === 'Gemini 2.5 Pro') {  
-                    await streamGemini(imgPath, res);
-                } else {
-                    // 默认使用 Qwen
-                    const txt = await callQwenVL(imgPath);
-                    if (txt) res.write(`data: ${JSON.stringify({ t: 'txt', c: txt })}\n\n`);
-                }
-            }
-        })();
-
-        await Promise.all([llmTask, mineruTask]);
-
-        if (isPdf) {
-            targetImages.forEach(p => { try { fs.unlinkSync(p); } catch(e){} });
-        }
-        
-        res.write(`data: ${JSON.stringify({ t: 'done' })}\n\n`);
-        res.end();
-
-    } catch (e) {
-        console.error('[Smart-OCR] Fail:', e);
-        res.write(`data: ${JSON.stringify({ t: 'err', c: e.message })}\n\n`);
-        res.end();
-    }
-});
-
 // ==========================================
-// === 数据库 & 业务接口 ===
+// === 业务路由 ===
 // ==========================================
-
-// 业务路由
 app.post('/api/auth/register', async (req, res) => { 
     try { 
         if (!req.body.username || !req.body.password) return res.status(400).json({ error: '用户名和密码不能为空' });
@@ -858,12 +446,11 @@ app.post('/api/auth/register', async (req, res) => {
 
         const hashedPassword = await bcrypt.hash(req.body.password, 10); 
         
-        // 【修改点】创建用户时自动生成 uid 和 inviteCode
         const user = new User({ 
             username: req.body.username, 
             password: hashedPassword,
-            uid: generateUid(),           // 改用新的 4 位数字函数
-            inviteCode: generateInviteCode() // 改用新的 6 位字母函数
+            uid: generateUid(),           
+            inviteCode: generateInviteCode() 
         });
         
         await user.save(); 
@@ -874,21 +461,17 @@ app.post('/api/auth/register', async (req, res) => {
     } 
 });
 
-// [修改] 登录接口
 app.post('/api/auth/login', async (req, res) => { 
     const user = await User.findOne({ username: req.body.username }); 
     if (!user) return res.status(400).json({ error: '用户不存在' }); 
     
     if (await bcrypt.compare(req.body.password, user.password)) { 
-        // --- 登录时触发经验结算 ---
         await addExperience(user._id, 'login');
         
-        // === [新增] 更新最后登录时间 (实现单点登录互斥) ===
         const loginTimestamp = Date.now();
         user.lastLoginTime = loginTimestamp;
         await user.save();
 
-        // 将登录时间戳写入 Token
         const token = jwt.sign({ 
             userId: user._id, 
             username: user.username,
@@ -896,26 +479,23 @@ app.post('/api/auth/login', async (req, res) => {
         }, SECRET_KEY); 
         
         const updatedUser = await User.findById(user._id);
+        const inviteCount = await User.countDocuments({ boundInviteCode: updatedUser.inviteCode });
 
-        // 返回完整用户信息
         res.json({ 
             token, 
-            following: updatedUser.following, // [新增] 返回关注列表ID数组
-            followers: updatedUser.followers, // [新增]
+            following: updatedUser.following, 
+            followers: updatedUser.followers, 
             username: updatedUser.username, 
             role: updatedUser.role || 'user',
             uid: updatedUser.uid,
             inviteCode: updatedUser.inviteCode,
-            // [新增] 返回等级信息
+            inviteCount: inviteCount,
             level: updatedUser.level,
             xp: updatedUser.xp,
-            // [新增] 返回会员信息
             vipType: updatedUser.vipType,
             vipExpiry: updatedUser.vipExpiry,
-            // [新增] 返回VIP等级信息
             vipLevel: updatedUser.vipLevel || 1,
             vipXp: updatedUser.vipXp || 0,
-            
             nickname: user.nickname || '',
             avatar: user.avatar || '',
             signature: user.signature || '',
@@ -923,66 +503,42 @@ app.post('/api/auth/login', async (req, res) => {
             birthDate: user.birthDate || '',
             school: user.school || '',
             boundInviteCode: user.boundInviteCode || '',
-            // [新增] 返回当前权益，供前端参考
             rights: getCurrentRights(updatedUser)
         }); 
     } else { 
         res.status(400).json({ error: '密码错误' }); 
     } 
 });
-const getStrLen = (str) => {
-    let len = 0;
-    for (let i = 0; i < str.length; i++) {
-        // charCodeAt > 127 视为双字节字符(如汉字)
-        if (str.charCodeAt(i) > 127) { 
-            len += 2; 
-        } else { 
-            len++; 
-        }
-    }
-    return len;
-};
 
-// --- [新增] 收藏行为触发经验值接口 ---
 app.post('/api/user/action/fav', authenticateToken, async (req, res) => {
     try {
         const user = await addExperience(req.user.userId, 'fav');
-        // 返回最新的等级和经验，供前端更新
         res.json({ success: true, level: user.level, xp: user.xp });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
 });
 
-// --- [新增] 模拟会员充值/续费接口 ---
 app.post('/api/user/vip/recharge', authenticateToken, async (req, res) => {
     try {
-        const { plan } = req.body; // 'diamond_month', 'blackgold_month'
+        const { plan } = req.body;
         const user = await User.findById(req.user.userId);
         
         const now = new Date();
-        // 如果当前已经是会员且未过期，从过期时间开始续费；否则从现在开始 (支持时长累加)
         let startTime = now;
         if (user.vipExpiry && new Date(user.vipExpiry) > now) {
             startTime = new Date(user.vipExpiry);
         }
 
-        // 简单的套餐逻辑 (模拟)
         let durationDays = 30; 
         let newType = 'none';
 
         if (plan === 'diamond_month') {
             newType = 'diamond';
-        } else if (plan === 'blackgold_month') {
-            newType = 'blackgold';
         } else {
             return res.status(400).json({ error: '无效的套餐' });
         }
 
-        // 如果用户原本是黑金，现在充钻石，这里涉及降级逻辑。
-        // 简化处理：直接覆盖类型，时间累加。实际业务可能需要更复杂的折算。
-        
-        // 计算新的过期时间
         const newExpiry = new Date(startTime.getTime() + durationDays * 24 * 60 * 60 * 1000);
 
         user.vipType = newType;
@@ -990,18 +546,12 @@ app.post('/api/user/vip/recharge', authenticateToken, async (req, res) => {
         
         await user.save();
 
-        res.json({ 
-            success: true, 
-            vipType: user.vipType, 
-            vipExpiry: user.vipExpiry 
-        });
-
+        res.json({ success: true, vipType: user.vipType, vipExpiry: user.vipExpiry });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
 });
 
-// === 新增：更新用户信息接口 ===
 app.post('/api/user/update', authenticateToken, async (req, res) => {
     try {
         const { nickname, signature, gender, birthDate, school, avatar, boundInviteCode } = req.body;
@@ -1014,7 +564,6 @@ app.post('/api/user/update', authenticateToken, async (req, res) => {
         if (school !== undefined) updateData.school = school;
         if (avatar !== undefined) updateData.avatar = avatar;
 
-        // --- 昵称处理 (保持不变) ---
         if (nickname) {
             const regex = /^[\u4e00-\u9fa5a-zA-Z0-9]+$/;
             if (!regex.test(nickname)) return res.status(400).json({ error: '昵称不能包含特殊符号' });
@@ -1025,27 +574,21 @@ app.post('/api/user/update', authenticateToken, async (req, res) => {
             updateData.nickname = nickname;
         }
 
-        // --- 核心：处理邀请码绑定 ---
         if (boundInviteCode) {
             const currentUser = await User.findById(userId);
             
-            // 1. 如果之前已经绑定过了，禁止修改
             if (currentUser.boundInviteCode) {
-                // 如果前端传的和存的不一样，报错；如果一样，忽略
                 if (currentUser.boundInviteCode !== boundInviteCode) {
                     return res.status(400).json({ error: '您已绑定过邀请码，不可更改' });
                 }
             } else {
-                // 2. 还没绑定过，执行绑定校验
                 if (boundInviteCode === currentUser.inviteCode) {
                     return res.status(400).json({ error: '不能绑定自己的邀请码' });
                 }
-                
                 const targetUser = await User.findOne({ inviteCode: boundInviteCode });
                 if (!targetUser) {
                     return res.status(400).json({ error: '邀请码不存在，请检查' });
                 }
-
                 updateData.boundInviteCode = boundInviteCode;
             }
         }
@@ -1059,24 +602,25 @@ app.post('/api/user/update', authenticateToken, async (req, res) => {
         res.status(500).json({ error: '更新失败: ' + e.message });
     }
 });
-app.post('/api/upload', upload.single('file'), (req, res) => { if (!req.file) return res.status(400).json({ error: '请选择文件' }); res.json({ url: `http://localhost:3001/uploads/${req.file.filename}` }); });
+
+app.post('/api/upload', upload.single('file'), (req, res) => { 
+    if (!req.file) return res.status(400).json({ error: '请选择文件' }); 
+    res.json({ url: `http://localhost:3001/uploads/${req.file.filename}` }); 
+});
+
 app.get('/api/subjects', authenticateToken, async (req, res) => { 
     const { mode } = req.query; 
-    // 【修改点】public 和 community 都读取 isPublic=true 的科目
     const query = (mode === 'public' || mode === 'community') 
         ? { isPublic: true } 
         : { creatorId: req.user.userId }; 
-    
-    if (mode === 'private') { /* ...原有初始化逻辑不变... */ } 
-    
     const subjects = await Subject.find(query).sort({ order: 1 }).lean(); 
     res.json(subjects); 
 });
+
 app.post('/api/subjects/manage', authenticateToken, async (req, res) => { 
     const { action, list } = req.body; 
     const mode = req.body.mode || req.query.mode; 
     
-    // ... (获取 user 逻辑保持不变) ...
     let user = req.user;
     try {
         const dbUser = await User.findById(req.user.userId);
@@ -1088,29 +632,37 @@ app.post('/api/subjects/manage', authenticateToken, async (req, res) => {
     
     try { 
         if (action === 'update_list') { 
-            // === [新增] 检查目录类型(科目)数量 ===
-            if (!isPublicMode) { // 只有私人空间才限制
+            if (!isPublicMode) {
                 const rights = getCurrentRights(user);
-                // list 是用户提交的最新科目列表，直接检查其长度
                 if (list.length > rights.subjectLimit) {
-                    return res.status(403).json({ 
-                        error: `您的会员等级最多只能创建 ${rights.subjectLimit} 个目录类型，请升级会员` 
-                    });
+                    return res.status(403).json({ error: `您的会员等级最多只能创建 ${rights.subjectLimit} 个目录类型，请升级会员` });
                 }
             }
-            // ====================================
 
             const existingSubjects = await Subject.find(userQuery); 
-            // ... (后续保存逻辑保持不变) ...
-            const existingIds = existingSubjects.map(s => s.id); const keepIds = list.filter(s => !s.id.startsWith('new_')).map(s => s.id); const toDelete = existingIds.filter(eid => !keepIds.includes(eid)); if (toDelete.length > 0) await Subject.deleteMany({ id: { $in: toDelete }, ...userQuery }); for (let i = 0; i < list.length; i++) { const item = list[i]; if (item.id.startsWith('new_')) { await new Subject({ id: new mongoose.Types.ObjectId().toString(), title: item.title, order: i, creatorId: req.user.userId, isPublic: isPublicMode }).save(); } else { await Subject.findOneAndUpdate({ id: item.id, ...userQuery }, { title: item.title, order: i }); } } res.json({ success: true }); 
+            const existingIds = existingSubjects.map(s => s.id); 
+            const keepIds = list.filter(s => !s.id.startsWith('new_')).map(s => s.id); 
+            const toDelete = existingIds.filter(eid => !keepIds.includes(eid)); 
+
+            if (toDelete.length > 0) await Subject.deleteMany({ id: { $in: toDelete }, ...userQuery }); 
+            
+            for (let i = 0; i < list.length; i++) { 
+                const item = list[i]; 
+                if (item.id.startsWith('new_')) { 
+                    await new Subject({ id: new mongoose.Types.ObjectId().toString(), title: item.title, order: i, creatorId: req.user.userId, isPublic: isPublicMode }).save(); 
+                } else { 
+                    await Subject.findOneAndUpdate({ id: item.id, ...userQuery }, { title: item.title, order: i }); 
+                } 
+            } 
+            res.json({ success: true }); 
         } else { res.status(400).json({ error: 'Invalid action' }); } 
     } catch(e) { res.status(500).json({ error: e.message }); } 
 });
+
 app.get('/api/categories', authenticateToken, async (req, res) => { 
     const { mode, subjectId } = req.query; 
     const query = { subjectId }; 
     
-    // 【修改点】public 和 community 都读取 isPublic=true 的目录
     if (mode === 'public' || mode === 'community') {
         query.isPublic = true;
     } else {
@@ -1120,35 +672,56 @@ app.get('/api/categories', authenticateToken, async (req, res) => {
     const flatCats = await Category.find(query).lean(); 
     res.json(buildTree(flatCats)); 
 });
+
 app.post('/api/categories/manage', authenticateToken, async (req, res) => { 
     if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
     const { action, subjectId, parentId, data, id, sourceId, targetId, position, title, children } = req.body; 
     const mode = req.body.mode || req.query.mode; 
     const userId = req.user.userId; 
     let user = req.user;
+    
     try {
         const dbUser = await User.findById(userId);
         if (dbUser) user = dbUser;
     } catch(e) {}
+    
     const isPublicMode = (mode === 'public' || mode === 'community') && user.role === 'admin';
     const query = isPublicMode ? { isPublic: true } : { creatorId: userId }; 
-    try { if (action === 'add-root' || action === 'add-sub') { await new Category({ id: new mongoose.Types.ObjectId().toString(), subjectId, title: data.title, parentId: action === 'add-sub' ? parentId : null, order: Date.now(), creatorId: userId, isPublic: isPublicMode }).save(); } else if (action === 'reorder') { const source = await Category.findOne({ id: sourceId, ...query }); const target = await Category.findOne({ id: targetId, ...query }); if (source && target) { if (source.parentId !== target.parentId) source.parentId = target.parentId; source.order = position === 'top' ? (target.order || 0) - 0.1 : (target.order || 0) + 0.1; await source.save(); } } else if (action === 'rename') { await Category.findOneAndUpdate({ id: id, ...query }, { title: title }); } else if (action === 'delete') { await deleteCategoryAndChildren(id, query); } else if (action === 'update_list') { if (children && Array.isArray(children)) await syncCategoriesRecursive(children, parentId, subjectId, userId, isPublicMode); } res.json({ success: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
+    
+    try { 
+        if (action === 'add-root' || action === 'add-sub') { 
+            await new Category({ id: new mongoose.Types.ObjectId().toString(), subjectId, title: data.title, parentId: action === 'add-sub' ? parentId : null, order: Date.now(), creatorId: userId, isPublic: isPublicMode }).save(); 
+        } else if (action === 'reorder') { 
+            const source = await Category.findOne({ id: sourceId, ...query }); 
+            const target = await Category.findOne({ id: targetId, ...query }); 
+            if (source && target) { 
+                if (source.parentId !== target.parentId) source.parentId = target.parentId; 
+                source.order = position === 'top' ? (target.order || 0) - 0.1 : (target.order || 0) + 0.1; 
+                await source.save(); 
+            } 
+        } else if (action === 'rename') { 
+            await Category.findOneAndUpdate({ id: id, ...query }, { title: title }); 
+        } else if (action === 'delete') { 
+            await deleteCategoryAndChildren(id, query); 
+        } else if (action === 'update_list') { 
+            if (children && Array.isArray(children)) await syncCategoriesRecursive(children, parentId, subjectId, userId, isPublicMode); 
+        } 
+        res.json({ success: true }); 
+    } catch (e) { res.status(500).json({ error: e.message }); } 
+});
+
 app.get('/api/filters', authenticateToken, async (req, res) => {
     try {
         const { subjectId, mode } = req.query;
         const query = { subjectId };
 
-        // === 修改点：区分三种模式的筛选范围 ===
         if (mode === 'public') {
-            // 官方空间：只筛选官方题目
             query.isPublic = true;
             query.isOfficial = true; 
         } else if (mode === 'community') {
-            // 公共空间：只筛选用户上传的题目
             query.isPublic = true;
             query.isOfficial = false; 
         } else {
-            // 私人空间：只筛选自己的题目
             query.creatorId = req.user.userId; 
         }
 
@@ -1173,22 +746,18 @@ app.get('/api/filters', authenticateToken, async (req, res) => {
         res.status(500).json({ error: e.message });
     }
 });
+
 app.get('/api/questions', authenticateToken, async (req, res) => { 
     const { mode, categoryIds, subjectId, type, difficulty, province, year, source, qNumber, tags } = req.query; 
-    
     const filter = {}; 
     
-    // === 模式判断 ===
     if (mode === 'public') {
-        // 官方空间：公开 + 官方标记
         filter.isPublic = true;
         filter.isOfficial = true;
     } else if (mode === 'community') {
-        // [新增] 公共空间：公开 + 非官方标记
         filter.isPublic = true;
-        filter.isOfficial = false; // 用户上传的题目
+        filter.isOfficial = false; 
     } else {
-        // 私人空间
         filter.creatorId = req.user.userId;
     }
 
@@ -1203,7 +772,6 @@ app.get('/api/questions', authenticateToken, async (req, res) => {
     if (tags) { const tagList = tags.split(','); filter.tags = { $in: tagList }; } 
     
     try { 
-        // [关键] populate creatorId 获取上传者信息
         const questions = await Question.find(filter)
             .sort({ _id: -1 })
             .populate('creatorId', 'username nickname avatar signature level following followers fans coupons vipLevel uid'); 
@@ -1211,29 +779,29 @@ app.get('/api/questions', authenticateToken, async (req, res) => {
         res.json({ total: questions.length, data: questions }); 
     } catch (e) { res.status(500).json({ error: e.message }); } 
 });
+
+// === [已修复语法] 题目发布接口 ===
 app.post('/api/questions/publish', authenticateToken, async (req, res) => {
     const { questionId, targetSubjectId, targetCategoryIds } = req.body;
     try {
-        // 1. 找到原题（必须是自己的）
         const originalQ = await Question.findOne({ _id: questionId, creatorId: req.user.userId }).lean();
         if (!originalQ) return res.status(404).json({ error: '找不到原题或无权操作' });
 
-        // 2. 清理字段，准备克隆
         delete originalQ._id;
         delete originalQ.id;
         delete originalQ.createdAt;
         delete originalQ.updatedAt;
 
-        // 3. 创建新题：强制设置为公开、非官方、当前用户为创建者
+        const nextId = await getNextQuestionId(targetSubjectId);
         const newQ = new Question({
             ...originalQ,
             creatorId: req.user.userId,
             subjectId: targetSubjectId,
             categoryIds: targetCategoryIds,
-            isPublic: true,      // 公开
-            isOfficial: false,   // 标记为公共空间（非官方）
+            isPublic: true,
+            isOfficial: false,
             addedTime: new Date().toISOString().split('T')[0],
-            code: 'P' + Date.now().toString().slice(-6) // 新编码 P开头
+            code: nextId
         });
 
         await newQ.save();
@@ -1242,29 +810,35 @@ app.post('/api/questions/publish', authenticateToken, async (req, res) => {
         res.status(500).json({ error: e.message });
     }
 });
+
 app.post('/api/questions', authenticateToken, async (req, res) => { 
     try { 
-        // === [新增] 检查自定义题目总量 ===
         const rights = getCurrentRights(req.user);
         const currentCount = await Question.countDocuments({ creatorId: req.user.userId });
         
         if (currentCount >= rights.maxQuestions) {
-            return res.status(403).json({ 
-                error: `您的自定义题目数量已达上限 (${currentCount}/${rights.maxQuestions})，请升级会员` 
-            });
+            return res.status(403).json({ error: `您的自定义题目数量已达上限 (${currentCount}/${rights.maxQuestions})，请升级会员` });
         }
-        // ==============================
 
         let user = req.user;
         const isPublicBody = req.body.isPublic === true || req.body.isPublic === 'true';
         const isPublic = (user.role === 'admin' && isPublicBody); 
-        const newQ = new Question({ ...req.body, creatorId: req.user.userId, isPublic: isPublic, addedTime: new Date().toISOString().split('T')[0] }); 
-        // --- [修改] 录题成功后增加经验 ---
+        
+        const nextId = await getNextQuestionId(req.body.subjectId);
+        const newQ = new Question({ 
+            ...req.body, 
+            code: nextId,        
+            creatorId: req.user.userId, 
+            isPublic: isPublic, 
+            addedTime: new Date().toISOString().split('T')[0] 
+        });
+
         await newQ.save();
         await addExperience(req.user.userId, 'input');
         res.json(newQ);
     } catch (e) { res.status(500).json({ error: '保存失败' }); } 
 });
+
 app.put('/api/questions/:id', authenticateToken, async (req, res) => { 
     try { 
         const user = await User.findById(req.user.userId); 
@@ -1273,8 +847,8 @@ app.put('/api/questions/:id', authenticateToken, async (req, res) => {
         if (!q) return res.status(404).json({error: '题目不存在'});
 
         let canEdit = false;
-        if (user.role === 'admin') canEdit = true; // 管理员通吃
-        else if (!q.isPublic && q.creatorId.toString() === req.user.userId) canEdit = true; // 私有且是自己的
+        if (user.role === 'admin') canEdit = true; 
+        else if (!q.isPublic && q.creatorId.toString() === req.user.userId) canEdit = true; 
 
         if (!canEdit) return res.status(403).json({error: '无权操作该题目'});
 
@@ -1282,6 +856,7 @@ app.put('/api/questions/:id', authenticateToken, async (req, res) => {
         res.json(updated); 
     } catch (e) { res.status(500).json({ error: '更新失败' }); } 
 });
+
 app.delete('/api/questions/:id', authenticateToken, async (req, res) => { 
     try { 
         const user = await User.findById(req.user.userId); 
@@ -1299,19 +874,42 @@ app.delete('/api/questions/:id', authenticateToken, async (req, res) => {
         res.json({ success: true }); 
     } catch (e) { res.status(500).json({ error: '删除失败' }); } 
 });
-app.post('/api/questions/fork', authenticateToken, async (req, res) => { const { questionId, targetSubjectId, targetCategoryIds } = req.body; try { const originalQ = await Question.findOne({ _id: questionId, isPublic: true }).lean(); if (!originalQ) return res.status(404).json({ error: '未找到该公共题目' }); delete originalQ._id; delete originalQ.id; const newQ = new Question({ ...originalQ, creatorId: req.user.userId, isPublic: false, subjectId: targetSubjectId, categoryIds: targetCategoryIds, addedTime: new Date().toISOString().split('T')[0], code: 'F' + Date.now().toString().slice(-6) }); await newQ.save(); res.json({ success: true, id: newQ.id }); } catch (e) { res.status(500).json({ error: e.message }); } });
 
-// 编译接口 (增加鉴权和限额)
+// === [已修复语法] 题目克隆(Fork)接口 ===
+app.post('/api/questions/fork', authenticateToken, async (req, res) => { 
+    const { questionId, targetSubjectId, targetCategoryIds } = req.body; 
+    try { 
+        const originalQ = await Question.findOne({ _id: questionId, isPublic: true }).lean(); 
+        if (!originalQ) return res.status(404).json({ error: '未找到该公共题目' }); 
+        
+        delete originalQ._id; 
+        delete originalQ.id; 
+        
+        const nextId = await getNextQuestionId(targetSubjectId);
+        const newQ = new Question({ 
+            ...originalQ, 
+            creatorId: req.user.userId, 
+            isPublic: false, 
+            subjectId: targetSubjectId, 
+            categoryIds: targetCategoryIds, 
+            addedTime: new Date().toISOString().split('T')[0], 
+            code: nextId
+        }); 
+        
+        await newQ.save(); 
+        res.json({ success: true, id: newQ.id }); 
+    } catch (e) { res.status(500).json({ error: e.message }); } 
+});
+
+// 编译接口
 app.post('/api/compile', authenticateToken, async (req, res) => {
     let { sourceCode, imageAssets } = req.body; 
     if (!sourceCode) return res.status(400).json({ error: '无 LaTeX 代码' });
 
     try {
-        // === [新增] 导出限额检查 ===
         await checkDailyLimit(req.user, 'exportLimit');
         req.user.dailyUsage.exportCount += 1;
         await req.user.save();
-        // =========================
 
         const timestamp = Date.now();
         const jobDir = path.join(compileDir, `job_${timestamp}`);
@@ -1337,7 +935,6 @@ app.post('/api/compile', authenticateToken, async (req, res) => {
                 const destPath = path.join(imagesDir, safeFilename);
                 let img = null;
                 try {
-                    // 处理本地上传的图片路径
                     if (url.includes('/uploads/')) {
                         try {
                             const urlPart = url.split('/uploads/')[1];
@@ -1348,16 +945,12 @@ app.post('/api/compile', authenticateToken, async (req, res) => {
                             }
                         } catch (localErr) {}
                     }
-                    // 处理网络图片
                     if (!img) img = await Jimp.read(url);
-                    
                     if (img) {
                         await img.write(destPath); 
-                        // 替换源码中的图片路径
                         sourceCode = sourceCode.split(originalSaveFilename).join(safeFilename);
                     }
                 } catch (err) {
-                    // 图片加载失败兜底：生成一个空白占位图，防止编译报错
                     new Jimp({ width: 100, height: 100, color: 0xFFFFFFFF }).write(destPath);
                     sourceCode = sourceCode.split(originalSaveFilename).join(safeFilename);
                 }
@@ -1395,17 +988,14 @@ app.post('/api/compile', authenticateToken, async (req, res) => {
     }
 });
 
-// [新增] Word 编译接口 (依赖 Pandoc) - 增加鉴权和限额
 app.post('/api/compile/word', authenticateToken, async (req, res) => {
     let { sourceCode, imageAssets } = req.body; 
     if (!sourceCode) return res.status(400).json({ error: '无 LaTeX 代码' });
 
     try {
-        // === [新增] 导出限额检查 ===
         await checkDailyLimit(req.user, 'exportLimit');
         req.user.dailyUsage.exportCount += 1;
         await req.user.save();
-        // =========================
 
         const timestamp = Date.now();
         const jobDir = path.join(compileDir, `word_job_${timestamp}`);
@@ -1416,7 +1006,6 @@ app.post('/api/compile/word', authenticateToken, async (req, res) => {
         const texFile = path.join(jobDir, `paper.tex`);
         const docxFilename = `paper.docx`;
     
-        // 1. 处理图片 (复用 PDF 的逻辑，Pandoc 也需要本地图片路径)
         if (imageAssets && typeof imageAssets === 'object') {
             let imgCounter = 0;
             const entries = Object.entries(imageAssets);
@@ -1426,7 +1015,6 @@ app.post('/api/compile/word', authenticateToken, async (req, res) => {
                 const destPath = path.join(imagesDir, safeFilename);
                 let img = null;
                 try {
-                    // 处理本地
                     if (url.includes('/uploads/')) {
                         try {
                             const urlPart = url.split('/uploads/')[1];
@@ -1437,29 +1025,21 @@ app.post('/api/compile/word', authenticateToken, async (req, res) => {
                             }
                         } catch (localErr) {}
                     }
-                    // 处理网络
                     if (!img) img = await Jimp.read(url);
-                    
                     if (img) {
                         await img.write(destPath); 
-                        // 替换源码路径 (Pandoc 需要相对路径)
                         sourceCode = sourceCode.split(originalSaveFilename).join(`images/${safeFilename}`);
                     }
                 } catch (err) {
-                    // 占位图
                     new Jimp({ width: 100, height: 100, color: 0xFFFFFFFF }).write(destPath);
                     sourceCode = sourceCode.split(originalSaveFilename).join(`images/${safeFilename}`);
                 }
             }
         }
 
-        // 2. 写入 Tex 文件
         fs.writeFileSync(texFile, sourceCode);
 
-        // 3. 调用 Pandoc 转换
         const templatePath = path.join(process.cwd(), 'template.docx');
-    
-        // 构建命令：如果有模板，就应用模板
         let cmd = `pandoc "paper.tex" -f latex -t docx -o "${docxFilename}" --standalone`;
     
         if (fs.existsSync(templatePath)) {
@@ -1477,7 +1057,6 @@ app.post('/api/compile/word', authenticateToken, async (req, res) => {
 
             const protocol = req.protocol;
             const host = req.get('host');
-            // 返回下载链接
             res.json({ url: `${protocol}://${host}/temp/word_job_${timestamp}/${docxFilename}` });
         });
 
@@ -1487,9 +1066,6 @@ app.post('/api/compile/word', authenticateToken, async (req, res) => {
     }
 });
 
-// ... existing code ...
-
-// === [新增] 关注/取消关注接口 ===
 app.post('/api/user/follow', authenticateToken, async (req, res) => {
     try {
         const targetUserId = req.body.targetId;
@@ -1504,41 +1080,28 @@ app.post('/api/user/follow', authenticateToken, async (req, res) => {
 
         if (!targetUser) return res.status(404).json({ error: '用户不存在' });
 
-        // 检查是否已经关注
         const isFollowing = currentUser.following.includes(targetUserId);
         let action = '';
 
         if (isFollowing) {
-            // === 取消关注逻辑 ===
-            // 1. 从我的关注列表中移除他
             await User.findByIdAndUpdate(currentUserId, { $pull: { following: targetUserId } });
-            // 2. 从他的粉丝列表中移除我
             await User.findByIdAndUpdate(targetUserId, { $pull: { followers: currentUserId } });
-            // 减少计数 (可选，如果前端不依赖数据库count字段而是数组长度)
             action = 'unfollowed';
         } else {
-            // === 关注逻辑 ===
-            // 1. 添加到我的关注列表
             await User.findByIdAndUpdate(currentUserId, { $addToSet: { following: targetUserId } });
-            // 2. 添加到他的粉丝列表
             await User.findByIdAndUpdate(targetUserId, { $addToSet: { followers: currentUserId } });
             action = 'followed';
         }
 
-        // 获取最新数据返回
         const newTarget = await User.findById(targetUserId);
         const newMe = await User.findById(currentUserId);
-
-        // 判断是否互相关注 (好友)
         const isFriend = newMe.following.includes(targetUserId) && newMe.followers.includes(targetUserId);
 
         res.json({ 
             success: true, 
             action,
             isFriend,
-            // 返回目标用户最新的粉丝数
             targetFollowersCount: newTarget.followers.length,
-            // 返回我最新的关注列表，用于前端更新状态
             myFollowing: newMe.following 
         });
 
@@ -1547,6 +1110,5 @@ app.post('/api/user/follow', authenticateToken, async (req, res) => {
         res.status(500).json({ error: e.message });
     }
 });
-
 
 app.listen(PORT, () => console.log(`🚀 API Server running on port ${PORT}`));
