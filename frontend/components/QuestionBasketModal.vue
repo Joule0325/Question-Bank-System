@@ -29,11 +29,11 @@
 
         <view v-else>
             <view v-for="(groupList, groupName) in groupedQuestions" :key="groupName" class="q-group">
-                <view class="group-label">{{ groupName }} ({{ groupList.length }})</view>
+                <view v-if="groupName !== '全部试题'" class="group-label">{{ groupName }} ({{ groupList.length }})</view>
                 
                 <view v-for="(q, idx) in groupList" :key="q.id" class="q-card">
                     <view class="q-header">
-                        <text class="mc-idx">#{{ idx + 1 }}</text>
+                        <text class="mc-idx">#{{ q._globalIndex }} <text style="font-size:10px;font-weight:normal;color:#cbd5e1;margin-left:5px;">ID:{{q.code || q.qNumber}}</text></text>
                         <text class="mc-del" @click="$emit('remove', q.id)">✕ 移出</text>
                     </view>
                     
@@ -116,70 +116,95 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import LatexText from './LatexText.vue';
 import { globalConfig, formatOptionLabel, formatSubIndex } from '@/utils/configStore.js';
 
 const props = defineProps({
   isOpen: Boolean,
-  basketId: [Number, String], // 当前选中的ID
-  baskets: Object,            // 所有的试题篮数据 {1:[], 2:[], ...}
-  knowledgeList: Array        // 用于把知识点ID转为名称
+  basketId: [Number, String], 
+  baskets: Object,            
+  knowledgeList: Array        
 });
 
 const emit = defineEmits(['close', 'update:basketId', 'clear', 'remove', 'export-pdf', 'export-word']);
 
 const showAnswerMap = ref({});
-const sortOptions = ['按题型排序', '按难度排序', '按知识点排序', '按年份排序', '按地区排序'];
-const currentSortMode = ref('按题型排序');
+const sortOptions = ['默认排序(按编号)', '按题型排序', '按难度排序', '按知识点排序', '按年份排序', '按地区排序'];
+// 提取用户上一次选的排序
+const currentSortMode = ref(uni.getStorageSync('BASKET_SORT_MODE') || '默认排序(按编号)');
 
 const currentBasketId = computed(() => props.basketId ? parseInt(props.basketId) : 1);
 
-// 获取当前篮子的题目列表
 const currentList = computed(() => {
     if (!props.baskets || !props.basketId) return [];
     return props.baskets[props.basketId] || [];
 });
 
-// 核心：分组逻辑
 const groupedQuestions = computed(() => {
-    const list = currentList.value;
+    // 1. 先将列表按照 7位数ID (code) 从小到大进行底层排序
+    let list = [...currentList.value].sort((a, b) => {
+        const codeA = String(a.code || a.qNumber || '');
+        const codeB = String(b.code || b.qNumber || '');
+        return codeA.localeCompare(codeB, undefined, { numeric: true });
+    });
+
     const groups = {};
     const mode = currentSortMode.value;
 
-    list.forEach(q => {
-        let key = '其他';
-        
-        if (mode === '按题型排序') {
-            key = q.type || '未分类';
-        } 
-        else if (mode === '按难度排序') {
-            key = '难度 ' + (q.difficulty || '?') + '星';
-        } 
-        else if (mode === '按年份排序') {
-            key = q.year ? q.year + '年' : '未知年份';
-        } 
-        else if (mode === '按地区排序') {
-            key = q.province || '未知地区';
-        } 
-        else if (mode === '按知识点排序') {
-            if (q.categoryIds && q.categoryIds.length > 0 && props.knowledgeList) {
-                // 尝试匹配第一个知识点ID对应的名称
-                // 注意：categoryIds 可能是字符串 "1,2,3" 也可能是数组
-                let firstId = Array.isArray(q.categoryIds) ? q.categoryIds[0] : q.categoryIds.toString().split(',')[0];
-                const tag = props.knowledgeList.find(k => k.id == firstId); // 使用 == 兼容字符串/数字
-                key = tag ? tag.title : '未知知识点';
-            } else {
-                key = '无知识点';
+    // 2. 如果是默认排序，只生成一个“全部试题”的分组即可
+    if (mode === '默认排序(按编号)') {
+        groups['全部试题'] = list.map(q => ({...q}));
+    } else {
+        // 3. 其他条件的分组逻辑
+        list.forEach(q => {
+            let key = '其他';
+            
+            if (mode === '按题型排序') key = q.type || '未分类';
+            else if (mode === '按难度排序') key = '难度 ' + (q.difficulty || '?') + '星';
+            else if (mode === '按年份排序') key = q.year ? q.year + '年' : '未知年份';
+            else if (mode === '按地区排序') key = q.province || '未知地区';
+            else if (mode === '按知识点排序') {
+                if (q.categoryIds && q.categoryIds.length > 0 && props.knowledgeList) {
+                    let firstId = Array.isArray(q.categoryIds) ? q.categoryIds[0] : q.categoryIds.toString().split(',')[0];
+                    const tag = props.knowledgeList.find(k => k.id == firstId); 
+                    key = tag ? tag.title : '未知知识点';
+                } else {
+                    key = '无知识点';
+                }
             }
-        }
 
-        if (!groups[key]) groups[key] = [];
-        groups[key].push(q);
+            if (!groups[key]) groups[key] = [];
+            groups[key].push({...q});
+        });
+    }
+
+    let finalGroups = groups;
+
+    // 4. 控制题型排序时“题型”大类的显示先后顺序
+    if (mode === '按题型排序') {
+        const typeOrder = ['单选题', '单项选择题', '选择题', '多选题', '多项选择题', '填空题', '解答题', '综合题'];
+        const orderedGroups = {};
+        typeOrder.forEach(t => {
+            Object.keys(groups).forEach(k => {
+                if (k.includes(t) && !orderedGroups[k]) orderedGroups[k] = groups[k];
+            });
+        });
+        Object.keys(groups).forEach(k => {
+            if (!orderedGroups[k]) orderedGroups[k] = groups[k];
+        });
+        finalGroups = orderedGroups;
+    }
+
+    // 5. 生成跨组的全局连续题号 (重要，导出时依赖这个)
+    let globalIdx = 1;
+    Object.values(finalGroups).forEach(gList => {
+        gList.forEach(q => {
+            q._globalIndex = globalIdx++;
+        });
     });
-    
-    // 如果需要对Key排序（例如年份倒序），可以在这里处理groups的顺序，目前保持插入顺序
-    return groups;
+
+    return finalGroups;
 });
 
 const close = () => emit('close');
@@ -191,7 +216,9 @@ const handleBasketChange = (e) => {
 };
 
 const handleSortChange = (e) => {
-    currentSortMode.value = sortOptions[e.detail.value];
+    const newSort = sortOptions[e.detail.value];
+    currentSortMode.value = newSort;
+    uni.setStorageSync('BASKET_SORT_MODE', newSort); // 存入缓存，告知导出模块
 };
 
 const handleClear = () => {
@@ -259,9 +286,9 @@ const dynamicFontStyle = computed(() => {
 
 /* Question Card Styles - Standardized */
 .q-card { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin-bottom: 12px; margin-right: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
-.q-header { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 10px; border-bottom: 1px dashed #f1f5f9; padding-bottom: 5px; }
-.mc-idx { font-weight: bold; color: #94a3b8; }
-.mc-del { color: #ef4444; cursor: pointer; }
+.q-header { display: flex; justify-content: space-between; font-size: 14px; margin-bottom: 10px; border-bottom: 1px dashed #f1f5f9; padding-bottom: 5px; }
+.mc-idx { font-weight: bold; color: #3b82f6; }
+.mc-del { color: #ef4444; cursor: pointer; font-size: 12px;}
 .q-body { cursor: pointer; color: #1e293b; }
 .q-title { margin-bottom: 8px; line-height: 1.6; }
 
@@ -311,6 +338,6 @@ const dynamicFontStyle = computed(() => {
     transition: opacity 0.2s;
 }
 .export-btn:active { opacity: 0.8; }
-.export-btn.pdf { background: #ef4444; } /* Red for PDF */
-.export-btn.word { background: #2563eb; } /* Blue for Word */
+.export-btn.pdf { background: #ef4444; } 
+.export-btn.word { background: #2563eb; } 
 </style>
